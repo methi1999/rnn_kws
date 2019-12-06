@@ -1,0 +1,44 @@
+dir:
+  dataset: '../datasets/TIMIT/' #for training NN
+  models: 'models/' #dir for storing models
+  plots: 'plots/' #dir for plots
+
+train:
+
+  batch_size: 75
+  
+  epochs: 1000 #total no. of epochs to train
+  
+  test_per_epoch: 1 #test per epoch i.e. how many times in ONE epoch
+  test_every_epoch: 25 #after how many epochs
+  print_per_epoch: 3 #print loss function how often in each epoch
+  save_every: 50 #save models after how many epochs
+  plot_every: 25 #save plots for test loss/train loss/accuracy
+
+  resume: True #resume training from saved model
+ 
+  loss_func: 'CTC' #loss function 
+  optim: 'Adam' #optimiser to speed up training
+  lr: 0.00025 #learning rate
+
+test:
+
+  batch_size: 75
+
+rnn: 'GRU'
+feat_dim: 38 #38 for log fitlerbank energies
+window_size: 0.025 #25 milliseconds
+window_step: 0.010 #10 ms
+num_phones: 39 #39 phone labels
+hidden_dim: 512
+num_layers: 4
+grad_clip: 3
+weighted_loss: True
+std_multiplier: 5
+bidirectional: True
+
+use_tcn: False
+depth_tcn: 8
+hidden_dim_tcn: 128
+
+cuda: True #whether to use NVIDIA cuda
