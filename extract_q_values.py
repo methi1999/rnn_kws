@@ -312,14 +312,15 @@ def find_batch_q(dump_path, min_phones):
     a = QValGenModel(config, min_phones, database_name, model_out_name)
     db, phone_to_id = a.get_outputs()
 
-    # load confusion matrix. Replace with all probs output by model after testing
-    with open(config['dir']['pickle'] + 'confmat.pkl', 'rb') as f:
-        conf_mat = pickle.load(f)
-    assert len(a.phone_to_id) == conf_mat.shape[0] + 1
-
-    insert_prob = [1 - conf_mat[i][i] for i in range(conf_mat.shape[0])]
-    delete_prob = [1 - conf_mat[i][i] for i in range(conf_mat.shape[0])]
-    replace_prob = conf_mat + 0.01
+    # load probabilities vectors
+    with open(config['dir']['pickle'] + 'probs.pkl', 'rb') as f:
+        insert_prob, delete_prob, replace_prob = pickle.load(f)
+        div = config['substi_prob_thesh_mult']
+        temp = np.where(replace_prob == 0, 1, replace_prob)
+        minimum = np.min(np.min(temp))
+        print("Minimum substitution prob:", minimum)
+        replace_prob = np.where(replace_prob == 0, minimum/div, replace_prob)
+        print("Probabilities:\nInsert:", insert_prob, '\nDelete:', delete_prob, '\nSubsti:', replace_prob)
 
     final_dict = {}
 

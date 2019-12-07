@@ -447,34 +447,36 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
             print("Dumped final results of testing")
 
     # grid search over parameter C
-    cvals = [0.1, 0.3, 0.5, 0.7, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.3, 2.5, 3, 3.5, 4, 4.5]
-    fscores = {}
+    cvals = list(np.arange(0, 5, 0.1))
+    prec_recall_dat = {}
     for c in cvals:
-        fscores[c] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
+        prec_recall_dat[c] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
 
     for res in final_results.values():
         for gr, pred in res['right']:
             for c in cvals:
                 if pred + c >= gr:
-                    fscores[c]['tp'] += 1
+                    prec_recall_dat[c]['tp'] += 1
                 else:
-                    fscores[c]['fn'] += 1
+                    prec_recall_dat[c]['fn'] += 1
         for gr, pred in res['wrong']:
             for c in cvals:
                 if pred + c >= gr:
-                    fscores[c]['fp'] += 1
+                    prec_recall_dat[c]['fp'] += 1
                 else:
-                    fscores[c]['tn'] += 1
+                    prec_recall_dat[c]['tn'] += 1
 
     # store metrics in dictionary
-    for c, vals in fscores.items():
+    fscore = []
+    for c, vals in prec_recall_dat.items():
         prec = vals['tp'] / (vals['tp'] + vals['fp'])
         recall = vals['tp'] / (vals['tp'] + vals['fn'])
-        fscores[c]['prec-recall'] = (prec, recall, 2 * prec * recall / (prec + recall))
+        prec_recall_dat[c]['prec-recall'] = (prec, recall, 2 * prec * recall / (prec + recall))
+        fscore.append(2 * prec * recall / (prec + recall))
 
-    print(fscores)
+    print('F-Scores:', fscore, '\nMax is:', max(fscore))
     with open(pr_dump_path, 'w') as f:
-        json.dump(fscores, f, indent=4)
+        json.dump(prec_recall_dat, f, indent=4)
     print("Dumped JSON")
 
 

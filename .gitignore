@@ -2,6 +2,7 @@ plots_GRU_4_512/
 models_GRU_4_512
 .idea/
 trial/
-confmat.pkl
+trial_old/
+*.pkl
 *.png
 *.json

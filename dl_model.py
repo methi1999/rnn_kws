@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import datetime
+from copy import deepcopy
 from model import RNN as Model
+import pickle
 from read_yaml import read_yaml
 from dataloader import timit_loader
 import scipy.io.wavfile as wav
@@ -184,6 +186,12 @@ class dl_model():
         edit_dist_batch = 0
         # number of sequences
         total_seq = 0
+        # operations dictionary for calculating probabilities
+        num_ph = self.model.num_phones
+        op_dict = {}
+        for i in range(num_ph):
+            op_dict[i] = {'matches': 0, 'insertions': 0, 'deletions': 0,
+                          'substitutions': np.zeros(self.model.num_phones), 'total': 0}
 
         print("Testing...")
         print('Total batches:', len(self.test_loader))
@@ -194,7 +202,7 @@ class dl_model():
             while True:
 
                 # retrieve batch from dataloader
-                inputs, labels, input_lens, label_lens, status = self.train_loader.return_batch()
+                inputs, labels, input_lens, label_lens, status = self.test_loader.return_batch()
                 inputs, labels, input_lens, label_lens = torch.from_numpy(np.array(inputs)).float(), torch.from_numpy(
                     np.array(labels)).long(), torch.from_numpy(np.array(input_lens)).long(), torch.from_numpy(
                     np.array(label_lens)).long()
@@ -225,19 +233,45 @@ class dl_model():
                     seq = list(argmaxed[i][:input_lens[i]])
                     # ground truth
                     gr_truth = list(labels[i][:label_lens[i]])
-                    # collapse neighboruign and remove blank token
+                    # collapse neighbouring and remove blank token
                     ctc_out = ctc_collapse(seq, self.model.blank_token_id)
-                    # print(len(gr_truth), len(ctc_out), gr_truth, ctc_out)
-                    edit_s = edit_distance(gr_truth, ctc_out, self.model.blank_token_id)
-                    edit_dist_batch += edit_s / (max(len(seq), len(ctc_out)))
-                    # print(edit_s)
+
+                    # calculated edit distance and required operations
+                    dist, opr = edit_distance(gr_truth, ctc_out)
+
+                    # update number of operations
+                    for op_type, ids in opr.items():
+                        if op_type == 'substitutions':
+                            for orig, replace in ids:
+                                op_dict[orig]['substitutions'][replace] += 1
+                                op_dict[idx]['total'] += 1
+                        else:
+                            for idx in ids:
+                                op_dict[idx][op_type] += 1
+                                op_dict[idx]['total'] += 1
+                    edit_dist_batch += dist / (max(len(seq), len(ctc_out)))
 
                 if status == 1:
                     break
 
+                print("Done with:", total_seq, '/', self.test_loader.num_egs)
+
         # Average out the losses and edit distance
         test_loss /= len(self.test_loader)
         edit_dist_batch /= total_seq
+
+        # Calculate the probabilities of insertion, deletion and substitution
+        prob_insert, prob_del, prob_substi = np.zeros(num_ph), np.zeros(num_ph), np.zeros((num_ph, num_ph))
+        for ph, data in op_dict.items():
+            prob_insert[ph] = data['insertions'] / data['total']
+            prob_del[ph] = data['deletions'] / data['total']
+            prob_substi[ph] = data['substitutions'] / data['total']
+
+        # Dump
+        prob_dump_path = self.config_file['dir']['pickle'] + 'probs.pkl'
+        with open(prob_dump_path, 'wb') as f:
+            pickle.dump((prob_insert, prob_del, prob_substi), f)
+            print("Dumped probabilities")
 
         print("Edit distance - %.4f , Loss: %.7f" % (edit_dist_batch, test_loss))
 
@@ -246,7 +280,8 @@ class dl_model():
         self.test_losses.append((test_loss, epoch))
 
         # if testing loss is minimum, store it as the 'best.pth' model, which is used for feature extraction
-        if test_loss == min([x[0] for x in self.test_losses]):
+        # store only when doing train/test together i.e. mode is train
+        if test_loss == min([x[0] for x in self.test_losses]) and self.mode == 'train':
             print("Best new model found!")
             self.model.save_model(True, epoch, self.train_losses, self.test_losses, self.edit_dist,
                                   self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
@@ -291,10 +326,7 @@ class dl_model():
         return softmax, self.model.phone_to_id, id_to_phone
 
     # Test for each wav file in the folder and also compares with ground truth if .PHN file exists
-    def test_folder(self, test_folder, top_n=1, show_graphs=False):
-
-        # For different values of top_n, we store different accuracies
-        accs = []
+    def test_folder(self, test_folder):
 
         for wav_file in sorted(os.listdir(test_folder)):
 
@@ -317,6 +349,7 @@ class dl_model():
             # calculate log mel filterbank energies for complete file
             feat_log_full = np.reshape(np.log(feat), (1, tsteps, hidden_dim))
             lens = np.array([tsteps])
+            # prepare tensors
             inputs, lens = torch.from_numpy(np.array(feat_log_full)).float(), torch.from_numpy(np.array(lens)).long()
             id_to_phone = {v[0]: k for k, v in self.model.phone_to_id.items()}
 
@@ -331,78 +364,35 @@ class dl_model():
                 # Pass through model
                 outputs = self.model(inputs, lens).cpu().numpy()
                 # Since only one example per batch and ignore blank token
-                outputs = outputs[0, :, :-1]
+                outputs = outputs[0]
                 softmax = np.exp(outputs) / np.sum(np.exp(outputs), axis=1)[:, None]
-                # Take argmax ot generate final string
+                # Take argmax to generate final string
                 argmaxed = np.argmax(outputs, axis=1)
-                final_str = [id_to_phone[a] for a in argmaxed]
+                # collapse according to CTC ruls
+                final_str = ctc_collapse(argmaxed, self.model.blank_token_id)
+                ans = [id_to_phone[a] for a in final_str]
                 # Generate dumpable format of phone, start time and end time
-                ans = compress_seq(final_str)
                 print("Predicted:", ans)
 
             phone_path = wav_path[:-3] + 'PHN'
 
-            # If .PHN file exists, report accuracy
+            # If .PHN file exists, report edit distance
             if os.path.exists(phone_path):
-                grtuth = read_phones(phone_path, self.replacement)
-                print("Ground truth:", grtuth)
-
-                unrolled_truth = []
-                for elem in grtuth:
-                    unrolled_truth += [elem[0]] * (elem[2] - elem[1] + 1)
-
-                truth_softmax = []
-                top_n_softmax = [[] for x in range(top_n)]
-                # Check for top-n
-                correct, total = 0, 0
-                for i in range(min(len(unrolled_truth), len(final_str))):
-
-                    truth_softmax.append(softmax[i][self.model.phone_to_id[unrolled_truth[i]][0]])
-
-                    indices = list(range(len(final_str)))
-                    zipped = zip(indices, outputs[i])
-                    desc = sorted(zipped, key=lambda x: x[1], reverse=True)
-                    cur_frame_res = [id_to_phone[x[0]] for x in desc][:top_n]
-
-                    for k in range(top_n):
-                        top_n_softmax[k].append(softmax[i][self.model.phone_to_id[cur_frame_res[k]][0]])
-
-                    if unrolled_truth[i] in cur_frame_res:
-                        # print truth softmax
-                        # if unrolled_truth[i] != cur_frame_res[0]:
-                        # print(i, truth_softmax[-1])
-                        correct += 1
-
-                    total += 1
-
-                accs.append(correct / total)
-
-                if show_graphs:
-                    # Plot actual softmax and predicted softmax
-                    for i in range(top_n):
-                        plt.plot(top_n_softmax[i], label=str(i + 1) + ' prob.')
-                    print(top_n_softmax)
-                    plt.plot(truth_softmax, label='Ground Truth prob', alpha=0.6)
-                    plt.xlabel("Frame number")
-                    plt.ylabel("Prob")
-                    plt.legend()
-                    plt.show()
+                truth = read_phones(phone_path, self.replacement)
+                edit_dist, ops = edit_distance(truth, ans)
+                print("Ground Truth:", truth, '\nEdit dsitance:', edit_dist)
 
                 with open(dump_path, 'w') as f:
                     f.write('Predicted:\n')
-                    for t in ans:
-                        f.write(' '.join(str(s) for s in t) + '\n')
+                    f.write(' '.join(ans))
                     f.write('\nGround Truth:\n')
-                    for t in grtuth:
-                        f.write(' '.join(str(s) for s in t) + '\n')
-                    f.write('\nTop-' + str(top_n) + ' accuracy is ' + str(correct / total))
+                    f.write(' '.join(truth))
+                    f.write('\nEdit distance: ' + str(edit_dist))
+
             else:
                 with open(dump_path, 'w') as f:
                     f.write('Predicted:\n')
-                    for t in ans:
-                        f.write(' '.join(str(s) for s in t) + '\n')
-        print(accs)
-
+                    f.write(' '.join(ans))
 
     def plot_loss_acc(self, epoch):
         """
@@ -485,36 +475,51 @@ def ctc_collapse(data, blank_id):
     return final
 
 
-def edit_distance(s1, s2, dim):
+def edit_distance(s1, s2):
     """
     Score for converting s1 into s2. Both s1 and s2 is a vector of phone IDs and not phones
     :param s1: string 1
     :param s2: string 2
-    :param prob_ins: 38x1 array of insert probabilities for each phone
-    :param prob_del: 38x1 array of delete probabilities for each phone
-    :param prob_replacement: matrix of size 38x38
-    :return:
+    :return: edit distance and insert, delete and substitution probabilities
     """
     m, n = len(s1), len(s2)
-    prob_ins, prob_del, prob_replacement = np.ones(dim), np.ones(dim), np.ones((dim, dim))
-
     dp = np.zeros((m + 1, n + 1))
+
+    op_dict = {}
+
+    for i in range(m + 1):
+        op_dict[i] = {}
+        for j in range(n + 1):
+            op_dict[i][j] = {'matches': [], 'insertions': [], 'deletions': [], 'substitutions': []}
 
     for i in range(m + 1):
         for j in range(n + 1):
 
             if i == 0:
-                dp[i][j] = np.sum(prob_ins[s2[:j]])
+                dp[i][j] = j
+                op_dict[i][j]['insertions'] = s2[:j]
             elif j == 0:
-                dp[i][j] = np.sum(prob_del[s1[:i]])
+                dp[i][j] = i
+                op_dict[i][j]['deletions'] = s1[:i]
             elif s1[i - 1] == s2[j - 1]:
                 dp[i][j] = dp[i - 1][j - 1]
+                op_dict[i][j] = deepcopy(op_dict[i - 1][j - 1])
+                op_dict[i][j]['matches'].append(s1[i - 1])
             else:
-                remove, insert, replace = prob_del[s1[i - 1]], prob_ins[s2[j - 1]], prob_replacement[s1[i - 1]][
-                    s2[j - 1]]
-                dp[i][j] = max(dp[i - 1][j] + remove, dp[i][j - 1] + insert, dp[i - 1][j - 1] + replace)
+                best = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + 1)
+                dp[i][j] = best
 
-    return dp[m][n]
+                if best == dp[i - 1][j] + 1:
+                    op_dict[i][j] = deepcopy(op_dict[i - 1][j])
+                    op_dict[i][j]['deletions'].append(s1[i - 1])
+                elif best == dp[i][j - 1] + 1:
+                    op_dict[i][j] = deepcopy(op_dict[i][j - 1])
+                    op_dict[i][j]['insertions'].append(s2[j - 1])
+                else:
+                    op_dict[i][j] = deepcopy(op_dict[i - 1][j - 1])
+                    op_dict[i][j]['substitutions'].append((s1[i - 1], s2[j - 1]))
+
+    return dp[m][n], op_dict[m][n]
 
 
 def read_phones(phone_file_path, replacement):
@@ -531,14 +536,14 @@ def read_phones(phone_file_path, replacement):
 
     for phone in a:
         s_e_i = phone[:-1].split(' ')  # start, end, phenome_name e.g. 0 5432 'aa'
-        start, end, ph = int(s_e_i[0]), int(s_e_i[1]), s_e_i[2]
+        _, _, ph = int(s_e_i[0]), int(s_e_i[1]), s_e_i[2]
         # Collapse
         for father, son in replacement.items():
             if ph in son:
                 ph = father
                 break
         # Append to list
-        labels.append((ph, sample_to_frame(start, is_start=True), sample_to_frame(end, is_start=False)))
+        labels.append(ph)
 
     return labels
 
@@ -570,9 +575,12 @@ def sample_to_frame(num, is_start, rate=16000, window=25, hop=10):
 
 
 if __name__ == '__main__':
-    a = dl_model('train')
-    a.train()
+    # a = dl_model('train')
+    # a.train()
     # a = dl_model('test')
     # a.test()
-    # a = dl_model('test_one')
-    # a.test_folder('trial/')
+    a = dl_model('test_one')
+    a.test_folder('trial/')
+    # a = [1, 1, 2, 3, 4, 4, 5]
+    # b = [1, 2, 2, 3, 4, 5]
+    # print(edit_distance(a, b))

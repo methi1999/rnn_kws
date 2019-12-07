@@ -6,7 +6,7 @@ dir:
 
 train:
 
-  batch_size: 75
+  batch_size: 400
   
   epochs: 1000 #total no. of epochs to train
   
@@ -24,7 +24,7 @@ train:
 
 test:
 
-  batch_size: 75
+  batch_size: 400
 
 rnn: 'GRU'
 feat_dim: 38 #38 for log fitlerbank energies
@@ -37,6 +37,7 @@ grad_clip: 3
 weighted_loss: True
 std_multiplier: 5
 bidirectional: True
-h_spike: 0.2 #minimum node probability to be considered in lattice
-
 cuda: True #whether to use NVIDIA cuda
+
+h_spike: 0.2 #minimum node probability to be considered in lattice
+substi_prob_thesh_mult: 2 #replace 0 in substitution matrix with min/this value
