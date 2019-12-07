@@ -30,6 +30,12 @@ class QValGenModel:
     """
 
     def __init__(self, config, min_phones, recordings_dump_path, model_out_path):
+        """
+        :param config: config files
+        :param min_phones: minimum number of instances of each phone to calculate Q value
+        :param recordings_dump_path: path to dump the feature vectors of the recordings to be considered
+        :param model_out_path: path to final q value dump
+        """
 
         self.config = config
         self.pkl_name = recordings_dump_path
@@ -40,7 +46,7 @@ class QValGenModel:
         # Initialise model
         self.rnn = dl_model('test_one')
 
-        # Load mapping
+        # Load mapping of phoen to id
         try:
             file_name = config['dir']['dataset'] + 'lstm_mapping.json'
             with open(file_name, 'r') as f:
@@ -53,6 +59,7 @@ class QValGenModel:
         except:
             print("Can't find phone mapping")
             exit(0)
+
 
     def gen_pickle(self):
         """
@@ -107,7 +114,7 @@ class QValGenModel:
         for wav_path, wrd_path, phone_path in paths:
 
             # break if found required number of phones
-            if all(x>self.min_phones for x in ph_count_dict.values()):
+            if all(x > self.min_phones for x in ph_count_dict.values()):
                 print("Found enough utterances to cover all phones")
                 break
 
@@ -155,7 +162,7 @@ class QValGenModel:
         return to_return
 
     def build_dataset(self, list_of_sent):
-        # each element in list-of_sent is a tuple (word, list of phones, filterbank features of full sentence)
+        # each element in list-of_sent is a tuple (ilterbank features of full sentence, list of phones)
 
         # Separate lists which return feature vectors, labels and lens
         self.final_feat = []
@@ -223,7 +230,7 @@ class QValGenModel:
     def get_outputs(self):
         """
         Run model through chosen recordings and dump the output
-        :return: output probabilities along with ground truth labels
+        :return: output probabilities along with ground truth labels and corresponding lengths
         """
 
         if os.path.exists(self.outputs_path):
@@ -231,11 +238,13 @@ class QValGenModel:
                 print("Loaded database file from pickle dump")
                 return pickle.load(f)
 
+        # build dataset of sentences to be tested
         sent = self.gen_pickle()
         self.build_dataset(sent)
 
         self.rnn.model.eval()
         cuda = (self.config['cuda'] and torch.cuda.is_available())
+        # final outputs
         final_outs = []
         cur_batch = 0
         total_egs = len(self.final_feat)
@@ -256,8 +265,10 @@ class QValGenModel:
                 input_lens = input_lens.cuda()
                 label_lens = label_lens.cuda()
 
-            outputs = self.rnn.model(inputs, input_lens).detach().numpy()
+            # forward pass
+            outputs = self.rnn.model(inputs, input_lens).detach().cpu().numpy()
 
+            # softmax
             for i in range(outputs.shape[0]):
                 softmax = np.exp(outputs[i]) / np.sum(np.exp(outputs[i]), axis=1)[:, None]
                 final_outs.append((softmax, input_lens[i], labels[i], label_lens[i]))
@@ -286,17 +297,23 @@ def find_batch_q(dump_path, min_phones):
             print('Loaded Q values from dump:', vals[0])
             return vals
 
+    # minimum node probability to qualify as a candidate
     h_spike = 0.2
 
     config = read_yaml()
-    database_name = 'QValGenModel_in_' + str(min_phones) + '.pkl'
-    model_out_name = 'QValGenModel_out_' + str(min_phones) + '.pkl'
+
+    if not os.path.exists(config['dir']['pickle']):
+        os.mkdir(config['dir']['pickle'])
+
+    database_name = config['dir']['pickle'] + 'QValGenModel_in_' + str(min_phones) + '.pkl'
+    model_out_name = config['dir']['pickle'] + 'QValGenModel_out_' + str(min_phones) + '.pkl'
 
     # Instantiates the model to calculate predictions
     a = QValGenModel(config, min_phones, database_name, model_out_name)
     db, phone_to_id = a.get_outputs()
 
-    with open('confmat.pkl', 'rb') as f:
+    # load confusion matrix. Replace with all probs output by model after testing
+    with open(config['dir']['pickle'] + 'confmat.pkl', 'rb') as f:
         conf_mat = pickle.load(f)
     assert len(a.phone_to_id) == conf_mat.shape[0] + 1
 
@@ -306,8 +323,9 @@ def find_batch_q(dump_path, min_phones):
 
     final_dict = {}
 
+    # for each sentence in database, find best subsequence, align and caluclate q values
     for i, (output, length, gr_phone, label_lens) in enumerate(db):
-        print("On output:",str(i)+"/"+str(len(db)))
+        print("On output:", str(i) + "/" + str(len(db)))
         cur_out = output[:length]
         gr_phone_ids = np.array(gr_phone[:label_lens])
 
@@ -321,7 +339,7 @@ def find_batch_q(dump_path, min_phones):
 
         # Add them up
         for ph_id, list_of_qvals in q_vals.items():
-            if not ph_id in final_dict.keys():
+            if ph_id not in final_dict.keys():
                 final_dict[ph_id] = []
             final_dict[ph_id] += list_of_qvals
     # Average out the values
@@ -335,4 +353,4 @@ def find_batch_q(dump_path, min_phones):
 
 
 if __name__ == '__main__':
-    find_batch_q('final_q_vals.pkl', min_phones=30)
+    find_batch_q('pickle/final_q_vals.pkl', min_phones=75)

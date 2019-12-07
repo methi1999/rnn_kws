@@ -23,6 +23,10 @@ def listdir(pth):
 
 
 def print_word_count(base_pth):
+    """
+    prints the count of each word in the TIMIT TEST dataset. Can be used to choose keywords to be tested
+    :param base_pth: path to root directory TIMIT/TEST
+    """
     keywords = {}
 
     for dialect in sorted(listdir(base_pth)):
@@ -49,12 +53,24 @@ def print_word_count(base_pth):
     print(keywords)
 
 
-def gen_cases(base_pth, pkl_name, trial_folder, num_templates, num_compares):
+def gen_cases(base_pth, pkl_name, template_folder, num_templates, num_compares, keywords):
+    """
+    Generates test cases on which model is to be tested
+    :param base_pth: root directory of TIMIT/TEST from where examples are picked
+    :param pkl_name: path to pickle dump which stores list of paths
+    :param template_folder: folder where template .wav clips are stored
+    :param num_templates: templates per keyword
+    :param num_compares: number of clips containing the keyword on which we want to test
+    :param keywords: list of keywords to be tested
+    :return: {kw1: {'templates':[[phone_list 1], [phone_list 2],..], 'test_wav_paths':[parth1,path2,...]}, kw2:...}
+    """
     if os.path.exists(pkl_name):
         with open(pkl_name, 'rb') as f:
             return pickle.load(f)
 
-    keywords = ['oily', 'people', 'before', 'living', 'potatoes', 'children', 'overalls', 'morning', 'enough', 'system']
+    if not os.path.exists(template_folder):
+        os.mkdir(template_folder)
+
     final_paths = {}
 
     paths = []
@@ -76,6 +92,7 @@ def gen_cases(base_pth, pkl_name, trial_folder, num_templates, num_compares):
 
                 paths.append((wav_path, wrd_path, phone_path))
 
+    # shuffle paths
     np.random.shuffle(paths)
 
     for wav_path, wrd_path, phone_path in paths:
@@ -95,7 +112,6 @@ def gen_cases(base_pth, pkl_name, trial_folder, num_templates, num_compares):
             if word in keywords:
                 # use this file as template
                 if len(final_paths[word]['templates']) < num_templates:
-                    # use this as template
                     list_of_phones = []
 
                     for phone in phone_list:
@@ -110,14 +126,17 @@ def gen_cases(base_pth, pkl_name, trial_folder, num_templates, num_compares):
                                     break
                             list_of_phones.append(ph)
 
+                    # append to list of templates
                     final_paths[word]['templates'].append(list_of_phones)
-                    dump_name = trial_folder + word + '_' + str(len(final_paths[word]['templates'])) + '.wav'
+                    # trim the .wav file and store only the keyword part
+                    dump_name = template_folder + word + '_' + str(len(final_paths[word]['templates'])) + '.wav'
                     (rate, sig) = wav.read(wav_path)
                     sig = sig[word_start:word_end + 1]
                     wav.write(dump_name, rate, sig)
 
                     print('Found keyword:', word, "in file", wav_path)
 
+                # use wav file to compare with keyword
                 elif len(final_paths[word]['test_wav_paths']) < num_compares:
                     final_paths[word]['test_wav_paths'].append(wav_path)
 
@@ -131,18 +150,20 @@ def gen_cases(base_pth, pkl_name, trial_folder, num_templates, num_compares):
 
 
 class BatchTestModel:
-    """
-    Loads the trained LSTM model for phone prediction and runs the chosen audio files through the model
-    """
 
     def __init__(self, config, cases):
+        """
+        Loads the trained LSTM model for phone prediction and runs the chosen audio files through the model
+        :param config: config file
+        :param cases: the dictionary returned by gen_cases function
+        """
 
         self.config = config
         self.idx = 0
         self.cases = cases
         self.win_len, self.win_step = config['window_size'], config['window_step']
-        self.pkl_name = 'BatchTestModel_in.pkl'
-        self.model_out_path = 'BatchTestModel_out.pkl'
+        self.pkl_name = config['dir']['pickle'] + 'BatchTestModel_in.pkl'
+        self.model_out_path = config['dir']['pickle'] + 'BatchTestModel_out.pkl'
         # Initialise model
         self.rnn = dl_model('test_one')
 
@@ -162,10 +183,10 @@ class BatchTestModel:
 
     def gen_pickle(self):
         """
-        # Iterates over the chosen cases
-        :return: Huge list of feature vectors of audio recordings and phones as a tuple for each frame
-                 Each item in returned list is a list corresponding to a single recording
-                 Each recording is in turn a list of tuples of (ph, feature_vector) for each frame
+        # Iterates over the chosen cases of audio clips
+        :return: list with each element as (feature_vectors, phones in sequence, keyword to be tested for)
+        Note that phones in sequence is NOT strictly required. Included for further examination ONLY.
+        Not used for prediction anywhere.
         """
 
         # Return if already exists
@@ -176,13 +197,16 @@ class BatchTestModel:
 
         paths = []
 
+        # build list which contains .wav, .PHN paths
         for word, data in self.cases.items():
 
             data = data['test_wav_paths']
             for wav_path in data:
                 paths.append((wav_path, wav_path[:-3] + 'PHN', word))
+
         to_return = []
 
+        # append the feature vectors, ground truth phones (not used for prediction), keyword to be tested on
         for wav_path, phone_path, word in paths:
             cur_phones = []
 
@@ -215,7 +239,10 @@ class BatchTestModel:
         return to_return
 
     def build_dataset(self, list_of_sent):
-        # each element in list-of_sent is a tuple (word, list of phones, filterbank features of full sentence)
+        """
+        Takes list of sentences and creates dataloader which can return data during testing
+        :param list_of_sent: list of (feature_vectors, phones in sequence, keyword to be tested for)
+        """
 
         # Separate lists which return feature vectors, labels and lens
         self.final_feat = []
@@ -237,7 +264,6 @@ class BatchTestModel:
               "fraction of examples")
 
         feature_dim = self.config['feat_dim']
-        pad_id = len(self.phone_to_id) - 1
 
         for sentence in list_of_sent:
             # Append 0s to feature vector to make a fixed dimensional matrix
@@ -247,7 +273,7 @@ class BatchTestModel:
             # Add pad token for 0s
             padding_l = max_label_len - len(sentence[1])
             current_labels = [self.phone_to_id[cur_ph] for cur_ph in sentence[1]]
-            current_labels += [pad_id] * padding_l
+            current_labels += [self.rnn.model.pad_token_id] * padding_l
 
             self.final_feat.append(current_features)
             self.final_labels.append(np.array(current_labels))
@@ -260,7 +286,10 @@ class BatchTestModel:
             zipped.sort(key=lambda triplet: triplet[2], reverse=True)
 
             self.final_feat, self.final_labels = [x[0] for x in zipped], [x[1] for x in zipped]
-            self.input_lens, self.label_lens, self.final_words = [x[2] for x in zipped], [x[3] for x in zipped], [x[4] for x in zipped]
+            self.input_lens, self.label_lens, self.final_words = [x[2] for x in zipped], [x[3] for x in zipped], [x[4]
+                                                                                                                  for x
+                                                                                                                  in
+                                                                                                                  zipped]
 
             self.num_egs = len(self.input_lens)
 
@@ -286,7 +315,7 @@ class BatchTestModel:
     def get_outputs(self):
         """
         Run model through chosen recordings and dump the output
-        :return: output probabilities along with ground truth labels
+        :return: output probabilities, ground truth labels, corresponding lengths, keyword to be tested
         """
 
         if os.path.exists(self.model_out_path):
@@ -294,6 +323,7 @@ class BatchTestModel:
                 print("Loaded database file from pickle dump")
                 return pickle.load(f)
 
+        # generate database of audio clips to be tested
         sent = self.gen_pickle()
         self.build_dataset(sent)
 
@@ -319,8 +349,9 @@ class BatchTestModel:
                 input_lens = input_lens.cuda()
                 label_lens = label_lens.cuda()
 
-            outputs = self.rnn.model(inputs, input_lens).detach().numpy()
+            outputs = self.rnn.model(inputs, input_lens).detach().cpu().numpy()
 
+            # softmax and append desired objects to final_outs
             for i in range(outputs.shape[0]):
                 softmax = np.exp(outputs[i]) / np.sum(np.exp(outputs[i]), axis=1)[:, None]
                 final_outs.append((softmax, input_lens[i], labels[i], label_lens[i], words[i]))
@@ -336,65 +367,87 @@ class BatchTestModel:
 
 
 def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
-    h_spike = 0.2
+    """
+    Master function which carries out actual testing
+    :param num_templates: number of templates for each keyword
+    :param num_compares: number of clips in which each keyword needs to be searched for
+    :param pr_dump_path: dump precision recall values
+    :param results_dump_path: dump comparison results so that c values can be tweaked easily
+    """
 
-    thresholds, insert_prob, delete_prob, replace_prob = find_batch_q('final_q_vals.pkl', min_phones=50)
+    if os.path.exists(results_dump_path):
+        with open(results_dump_path, 'rb') as f:
+            final_results = pickle.load(f)
+    else:
+        keywords = ['oily', 'people', 'before', 'living', 'potatoes', 'children', 'overalls', 'morning', 'enough', 'system',
+                    'water', 'greasy', 'suit', 'dark', 'very', 'without', 'money']
 
-    pkl_name = 'test_cases_' + str(num_templates) + '_' + str(num_compares) + '.pkl'
-    cases = gen_cases('../datasets/TIMIT/TEST/', pkl_name, 'templates/', num_templates, num_compares)
+        config = read_yaml()
+        h_spike = config['h_spike']
 
-    final_results = {}
-    for kw in cases.keys():
-        final_results[kw] = {'right': [], 'wrong': []}
+        # Q values and probabilities are loaded. Important to load probability values from HERE since
+        # they influence thresholds and Q-values
+        thresholds, insert_prob, delete_prob, replace_prob = find_batch_q(config['dir']['pickle'] + 'final_q_vals.pkl',
+                                                                          min_phones=50)
 
-    config = read_yaml()
-    a = BatchTestModel(config, cases)
-    db, phone_to_id = a.get_outputs()
-    id_to_phone = {v: k for k, v in phone_to_id.items()}
+        pkl_name = config['dir']['pickle'] + 'test_cases_' + str(num_templates) + '_' + str(num_compares) + '.pkl'
+        # generate cases to be tested on
+        cases = gen_cases('../datasets/TIMIT/TEST/', pkl_name, 'templates/', num_templates, num_compares, keywords)
 
-    assert len(phone_to_id) == replace_prob.shape[0] + 1
+        # dictionary for storing c values required to declare keyword
+        final_results = {}
+        for kw in cases.keys():
+            final_results[kw] = {'right': [], 'wrong': []}
 
-    for i, (output, length, gr_phone_entire_clip, label_lens, word_in_clip) in enumerate(db):
-        print("On output:", str(i) + "/" + str(len(db)))
-        cur_out = output[:length]
-        gr_phone_entire_clip = gr_phone_entire_clip[:label_lens]
+        # initialise model
+        a = BatchTestModel(config, cases)
+        db, phone_to_id = a.get_outputs()
 
-        # Generate lattice from current predictions
-        final_lattice = generate_lattice(cur_out, h_spike, True, a.rnn.model.blank_token_id, print_final_lattice=False)
+        assert len(phone_to_id) == replace_prob.shape[0] + 1
 
-        for template_word, templates in cases.items():
+        # iterate over every clip and compare it with every template one-by-one
+        # note that gr_phone_entire_clip is NOT USED
+        for i, (output, length, gr_phone_entire_clip, label_lens, word_in_clip) in enumerate(db):
+            print("On output:", str(i) + "/" + str(len(db)))
+            cur_out = output[:length]
 
-            templates = templates['templates']
+            # generate lattice from current predictions
+            final_lattice = generate_lattice(cur_out, h_spike, True, a.rnn.model.blank_token_id, print_final_lattice=False)
+            # node probabilites of full lattice. best only
+            node_prob = [x[0][1] for x in final_lattice]
+            # compare with every template
+            for template_word, templates in cases.items():
 
-            for gr_phones in templates:
+                templates = templates['templates']
 
-                gr_phone_ids = [phone_to_id[x] for x in gr_phones]
+                for gr_phones in templates:
+                    # template phone sequence
+                    gr_phone_ids = [phone_to_id[x] for x in gr_phones]
 
-                res = traverse_best_lattice(final_lattice, gr_phone_ids, insert_prob, delete_prob, replace_prob)
-                # print("predicted:", [id_to_phone[x] for x in res], "actual:", [id_to_phone[x] for x in gr_phone_ids])
-                q_vals = find_q_values(gr_phone_ids, res, [x[0][1] for x in final_lattice], insert_prob, delete_prob,
-                                       replace_prob)
-                # print(q_vals)
-                predicted_log_val, gr_log_val = 0, 0
-                for pred_phone, vals in q_vals.items():
-                    for val in vals:
-                        predicted_log_val += np.log(val)
-                    gr_log_val += (np.log(thresholds[pred_phone][0]) * len(vals))
-                # print(predicted_log_val, gr_log_val, gr_log_val - predicted_log_val)
+                    res = traverse_best_lattice(final_lattice, gr_phone_ids, insert_prob, delete_prob, replace_prob)
+                    # print("predicted:", [id_to_phone[x] for x in res], "actual:", [id_to_phone[x] for x in gr_phone_ids])
+                    # calculate q values
+                    q_vals = find_q_values(gr_phone_ids, res, node_prob, insert_prob, delete_prob, replace_prob)
+                    # sum up the predicted q values
+                    predicted_log_val, gr_log_val = 0, 0
+                    for pred_phone, vals in q_vals.items():
+                        for val in vals:
+                            predicted_log_val += np.log(val)
+                        gr_log_val += (np.log(thresholds[pred_phone][0]) * len(vals))
 
-                # print("Clip contains:", word_in_clip, "Template:", template_word)
-                # print(gr_log_val - predicted_log_val)
+                    if template_word == word_in_clip:
+                        # gr_log_val should be < predicted_log_val + c
+                        final_results[template_word]['right'].append((gr_log_val, predicted_log_val))
+                    else:
+                        # gr_log_val should be > predicted_log_val + c
+                        final_results[template_word]['wrong'].append((gr_log_val, predicted_log_val))
 
-                if template_word == word_in_clip:
-                    final_results[template_word]['right'].append((gr_log_val, predicted_log_val))
-                else:
-                    final_results[template_word]['wrong'].append((gr_log_val, predicted_log_val))
+        with open(results_dump_path, 'wb') as f:
+            pickle.dump(final_results, f)
+            print("Dumped final results of testing")
 
-    with open(results_dump_path, 'wb') as f:
-        pickle.dump(final_results, f)
-        print("Dumped final results of testing")
-
-    cvals = [0.1, 0.3, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5]
+    # grid search over parameter C
+    cvals = [0.1, 0.3, 0.5, 0.7, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.3, 2.5, 3, 3.5, 4, 4.5]
     fscores = {}
     for c in cvals:
         fscores[c] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
@@ -402,21 +455,22 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
     for res in final_results.values():
         for gr, pred in res['right']:
             for c in cvals:
-                if pred+c >= gr:
+                if pred + c >= gr:
                     fscores[c]['tp'] += 1
                 else:
                     fscores[c]['fn'] += 1
         for gr, pred in res['wrong']:
             for c in cvals:
-                if pred+c >= gr:
+                if pred + c >= gr:
                     fscores[c]['fp'] += 1
                 else:
                     fscores[c]['tn'] += 1
 
+    # store metrics in dictionary
     for c, vals in fscores.items():
-        prec = vals['tp']/(vals['tp']+vals['fp'])
+        prec = vals['tp'] / (vals['tp'] + vals['fp'])
         recall = vals['tp'] / (vals['tp'] + vals['fn'])
-        fscores[c]['prec-recall'] = (prec, recall, 2*prec*recall/(prec+recall))
+        fscores[c]['prec-recall'] = (prec, recall, 2 * prec * recall / (prec + recall))
 
     print(fscores)
     with open(pr_dump_path, 'w') as f:
@@ -424,4 +478,6 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
     print("Dumped JSON")
 
 
-batch_test(3, 5, 'pr.json', 'final_res.pkl')
+if __name__ == "__main__":
+    batch_test(3, 12, 'pr.json', 'pickle/final_res.pkl')
+    # print_word_count('../datasets/TIMIT/TEST/')

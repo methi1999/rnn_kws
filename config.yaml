@@ -1,7 +1,8 @@
 dir:
-  dataset: '../datasets/TIMIT/' #for training NN
-  models: 'models/' #dir for storing models
-  plots: 'plots/' #dir for plots
+  dataset: '../datasets/TIMIT/' # dataset directory
+  models: 'models/' # for storing models
+  plots: 'plots/' # for plots
+  pickle: 'pickle/' # pickle dumps root path
 
 train:
 
@@ -9,7 +10,7 @@ train:
   
   epochs: 1000 #total no. of epochs to train
   
-  test_per_epoch: 1 #test per epoch i.e. how many times in ONE epoch
+  test_per_epoch: 0 #test per epoch i.e. how many times in ONE epoch
   test_every_epoch: 25 #after how many epochs
   print_per_epoch: 3 #print loss function how often in each epoch
   save_every: 50 #save models after how many epochs
@@ -36,9 +37,6 @@ grad_clip: 3
 weighted_loss: True
 std_multiplier: 5
 bidirectional: True
-
-use_tcn: False
-depth_tcn: 8
-hidden_dim_tcn: 128
+h_spike: 0.2 #minimum node probability to be considered in lattice
 
 cuda: True #whether to use NVIDIA cuda

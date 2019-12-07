@@ -17,7 +17,7 @@ fscore = [x['prec-recall'][2] for x in data.values()]
 c = np.array([float(x) for x in list(data.keys())])
 print(prec, recall, fscore, c)
 
-width = 0.05
+width = 0.03
 ax = plt.subplot(111)
 ax.bar(c - width, prec, width=width, color='b', align='center', label='Precision')
 ax.bar(c, recall, width=width, color='g', align='center', label='Recall')

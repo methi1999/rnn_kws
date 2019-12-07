@@ -3,9 +3,9 @@ from dl_model import dl_model
 from operator import add
 from copy import deepcopy
 
+# prevents underflow
 func = np.log
 inv_func = np.exp
-using_ctc = True
 
 
 def edit_distance(s1, s2, prob_ins, prob_del, prob_replacement):
@@ -130,7 +130,9 @@ def traverse_best_lattice(lattice, target_string, insert_prob, del_prob, replace
         edit_matrix = edit_distance(target_string, cur_string, insert_prob, del_prob, replace_prob)
         prob = 0
         for j in range(i, m):
+            # log converts multiplication to addition
             prob += func(lattice[j][0][1])
+            # n since first string is target string and we compare each subsequence with complete target string
             final_score = prob + edit_matrix[n][j - i + 1]
             # print('Final score (for i,j) = ({},{}) is {} + {} = {}'.format(i, j, prob, edit_matrix[n][j - i + 1],
             #                                                                final_score))
@@ -142,7 +144,6 @@ def traverse_best_lattice(lattice, target_string, insert_prob, del_prob, replace
     return best_subsequence
 
 
-
 def find_q_values(s1, s2, s2_node_prob, prob_ins, prob_del, prob_replacement):
     """
     Given best hypothesis and reference string, outputs the required Q scores for each phone
@@ -152,18 +153,22 @@ def find_q_values(s1, s2, s2_node_prob, prob_ins, prob_del, prob_replacement):
     :param prob_ins: score for inserting a phone
     :param prob_del: score for deleting a phone
     :param prob_replacement: confusion matrix
-    :return: a dictionary of matching, inserting, deleting and replacing phones with the following convention:
-    matching tuples - (index in reference, phone_id, lstm probability)
-    insertion tuples - (index in hypotheses, phone_id, insertion prob of phone)
-    deletion tuples - (index in reference, phone_id, deletion prob of phone)
-    substitution tuples - (index in reference, old phone_id, index in hypotheses, new phone_id, replacement prob, new node prob)
+    :return: {phone1: [list of q vals], phone2: [list of qvals], ...}
     """
     m, n = len(s1), len(s2)
     dp = np.zeros((m + 1, n + 1))
     prob_ins, prob_del, prob_replacement, s2_node_prob = np.array(func(prob_ins)), np.array(func(prob_del)), np.array(
         func(prob_replacement)), func(np.array(s2_node_prob))
     # print('\nGround Truth:', s1, '\nBest Hypotheses:', s2, '\n')
+    """
+    op_dict is a dictionary of matching, inserting, deleting and replacing phones with the following convention:
+    matching tuples - (index in reference, phone_id, lstm probability)
+    insertion tuples - (index in hypotheses, phone_id, insertion prob of phone)
+    deletion tuples - (index in reference, phone_id, deletion prob of phone)
+    substitution tuples - (index in reference, old phone_id, index in hypotheses, new phone_id, replacement prob, new node prob)
+    """
     op_dict = {}
+
     for i in range(m + 1):
         op_dict[i] = {}
         for j in range(n + 1):
@@ -254,11 +259,7 @@ def read_grtruth(filepath):
 
 
 if __name__ == '__main__':
-    # a = [0, 0, 2, 1, 2, 2, 1]
-    # b = [0, 1, 2, 1, 1]
-    # print(find_q_values(b, a, [1,1,1,1,1,1,1,1] , [0.4, 0.4, 0.4], [0.4, 0.4, 0.4], [[0.4, 0.4, 0.4] for i in range(3)]))
-    # exit(0)
-    # print(find_q_values(a, b, None, [0.4, 0.4, 0.4], [0.4, 0.4, 0.4], [[0.4, 0.4, 0.4] for i in range(3)]))
+
     insert_prob, delete_prob, replace_prob = 0.5 * np.ones((39)), 0.5 * np.ones((39)), 0.5 * np.ones((39, 39))
     a = dl_model('test_one')
     outputs, phone_to_id, id_to_phone = a.test_one('trial/SI912.wav')

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import datetime
-import pickle
+from model import RNN as Model
 from read_yaml import read_yaml
 from dataloader import timit_loader
 import scipy.io.wavfile as wav
@@ -24,14 +24,9 @@ class dl_model():
         self.mode = mode
 
         # Architecture name decides prefix for storing models and plots
-        if self.config_file['use_tcn']:
-            from model import TCN as Model
-            arch_name = '_'.join(
-                ['tcn', str(self.config_file['num_layers']), str(self.config_file['hidden_dim'])])
-        else:
-            from model import RNN as Model
-            arch_name = '_'.join(
-                [self.config_file['rnn'], str(self.config_file['num_layers']), str(self.config_file['hidden_dim'])])
+
+        arch_name = '_'.join(
+            [self.config_file['rnn'], str(self.config_file['num_layers']), str(self.config_file['hidden_dim'])])
 
         print("Architecture:", arch_name)
         # Change paths for storing models
@@ -46,8 +41,7 @@ class dl_model():
 
         self.cuda = (self.config_file['cuda'] and torch.cuda.is_available())
 
-        self.output_dim = self.config_file['num_phones']
-
+        # load/initialise metrics to be stored and load model
         if mode == 'train' or mode == 'test':
 
             self.plots_dir = self.config_file['dir']['plots']
@@ -145,6 +139,7 @@ class dl_model():
                 # store loss
                 epoch_loss += loss.item()
 
+                # print loss
                 if i in print_range:
                     try:
                         print('After %i batches, Current Loss = %.7f, Avg. Loss = %.7f' % (
@@ -152,10 +147,12 @@ class dl_model():
                     except:
                         pass
 
+                # test model periodically
                 if i in test_range:
                     self.test(epoch)
                     self.model.train()
 
+                # Reached end of dataset
                 if status == 1:
                     break
 
@@ -179,21 +176,24 @@ class dl_model():
                 self.model.save_model(False, epoch, self.train_losses, self.test_losses, self.edit_dist,
                                       self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
 
+    # test model
     def test(self, epoch=None):
 
         self.model.eval()
+        # edit distance of batch
         edit_dist_batch = 0
+        # number of sequences
         total_seq = 0
 
         print("Testing...")
         print('Total batches:', len(self.test_loader))
         test_loss = 0
-        blank_token_id = self.model.output_dim - 1
 
         with torch.no_grad():
 
             while True:
 
+                # retrieve batch from dataloader
                 inputs, labels, input_lens, label_lens, status = self.train_loader.return_batch()
                 inputs, labels, input_lens, label_lens = torch.from_numpy(np.array(inputs)).float(), torch.from_numpy(
                     np.array(labels)).long(), torch.from_numpy(np.array(input_lens)).long(), torch.from_numpy(
@@ -211,15 +211,22 @@ class dl_model():
                 outputs = self.model(inputs, input_lens)
                 loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
                 test_loss += loss.item()
+                # increment number of examples
                 total_seq += outputs.shape[0]
 
                 outputs = outputs.cpu().numpy()
                 labels = labels.cpu().numpy()
+                # argmax over the phone channel
                 argmaxed = np.argmax(outputs, axis=2)
+
+                # calculated edit distance between ground truth and predicted sequence
                 for i in range(outputs.shape[0]):
+                    # predicted
                     seq = list(argmaxed[i][:input_lens[i]])
+                    # ground truth
                     gr_truth = list(labels[i][:label_lens[i]])
-                    ctc_out = ctc_collapse(seq, blank_token_id)
+                    # collapse neighboruign and remove blank token
+                    ctc_out = ctc_collapse(seq, self.model.blank_token_id)
                     # print(len(gr_truth), len(ctc_out), gr_truth, ctc_out)
                     edit_s = edit_distance(gr_truth, ctc_out, self.model.blank_token_id)
                     edit_dist_batch += edit_s / (max(len(seq), len(ctc_out)))
@@ -228,13 +235,13 @@ class dl_model():
                 if status == 1:
                     break
 
-        # Simple accuracy metrix = (# correctly classified) / (total number of phones)
-
+        # Average out the losses and edit distance
         test_loss /= len(self.test_loader)
         edit_dist_batch /= total_seq
 
         print("Edit distance - %.4f , Loss: %.7f" % (edit_dist_batch, test_loss))
 
+        # Store in lists for keeping track of model performance
         self.edit_dist.append((edit_dist_batch, epoch))
         self.test_losses.append((test_loss, epoch))
 
@@ -246,9 +253,14 @@ class dl_model():
 
         return edit_dist_batch
 
-    # Called during feature extraction. Takes file path as input and outputs the phone predictions after softmax layer
     def test_one(self, file_path):
+        """
+        Called during feature extraction
+        :param file_path: file path t input .wav file to be tested
+        :return: predicted phone probabilities after after softmax layer
+        """
 
+        # read .wav file
         (rate, sig) = wav.read(file_path)
         assert rate == 16000
         # sig ranges from -32768 to +32768 AND NOT -1 to +1
@@ -271,7 +283,7 @@ class dl_model():
 
             # Pass through model
             outputs = self.model(inputs, lens).cpu().numpy()
-            # Since only one example per batch and ignore blank token
+            # Since only one example per batch
             outputs = outputs[0]
             softmax = np.exp(outputs) / np.sum(np.exp(outputs), axis=1)[:, None]
 
@@ -391,8 +403,12 @@ class dl_model():
                         f.write(' '.join(str(s) for s in t) + '\n')
         print(accs)
 
-    # take train/test loss and test accuracy input and plot it over time
+
     def plot_loss_acc(self, epoch):
+        """
+        take train/test loss and test accuracy input and plot it over time
+        :param epoch: to track performance across epochs
+        """
 
         plt.clf()
         plt.plot([x[1] for x in self.train_losses], [x[0] for x in self.train_losses], c='r', label='Train')
@@ -420,26 +436,39 @@ class dl_model():
 
 
 def compress_seq(data):
-    # Compresses a sequence (a,a,b,b,b,b,c,d,d....) into [(a,0,1),(b,2,5),...] i.e. [(phone, start_id, end_index]
+    """
+    Compresses a sequence (a,a,b,b,b,b,c,d,d....) into [(a,0,1),(b,2,5),...] i.e. [(phone, start_id, end_index]
+    :param data: list of elements
+    :return: data in the above format
+    """
+
     final = []
     current_ph, current_start_idx = data[0], 0
 
     for i in range(2, len(data)):
         now_ph = data[i]
         if now_ph == current_ph:
+            # same so continue
             continue
         else:
+            # different element so append current and move on to the next
             final.append((current_ph, current_start_idx, i - 1))
             current_start_idx = i
             current_ph = now_ph
+    # final element yet to be appended
     final.append((current_ph, current_start_idx, len(data) - 1))
     return final
 
 
 def ctc_collapse(data, blank_id):
-    # Compresses a sequence (a,a,b,b,b,b,c,d,d....) into [(a,0,1),(b,2,5),...] i.e. [(phone, start_id, end_index]
+    """
+    Collapse consecutive frames and then remove blank tokens
+    :param data: list of elements e.g. [1,1,2,3,2,0,2,0]
+    :param blank_id: blank token id
+    :return: [1,2,3,2,2] in the above case
+    """
     final = []
-    current_ph, current_start_idx = data[0], 0
+    current_ph = data[0]
 
     for i in range(2, len(data)):
         now_ph = data[i]
@@ -447,9 +476,11 @@ def ctc_collapse(data, blank_id):
             continue
         else:
             final.append(current_ph)
-            current_start_idx = i
             current_ph = now_ph
+
+    # Append final element
     final.append(current_ph)
+    # weed out the blank tokens
     final = [x for x in final if x != blank_id]
     return final
 
