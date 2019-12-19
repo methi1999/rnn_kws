@@ -6,6 +6,7 @@ from metadata import timit_data
 # Set the seed to replicate results
 random.seed(a=7)
 
+
 # Returns data during training/testing from the dumped pickle file by metadata.py
 class timit_loader():
     """
@@ -19,7 +20,11 @@ class timit_loader():
 
         metadata = timit_data(type_.upper(), config_file)
         # Returns huge list of feature vectors of audio recordings and phones as a tuple for each frame
-        list_of_sent = metadata.gen_pickle()
+
+        if type_ == 'train':
+            list_of_sent, self.data_mean, self.data_std = metadata.gen_pickle()
+        else:
+            list_of_sent, _, _ = metadata.gen_pickle()
 
         self.mode = type_  # train/test/test-one
         self.batch_size = config_file[type_]['batch_size']
@@ -60,7 +65,8 @@ class timit_loader():
         label_lens = [len(x[1]) for x in list_of_sent]
         max_l = max(sent_lens)
         max_label_len = max(label_lens)
-        print("Max length:", max_l, max_label_len, "; Ignored", (len(lengths) - len(sent_lens)) / len(lengths), "fraction of examples")
+        print("Max length:", max_l, max_label_len, "; Ignored", (len(lengths) - len(sent_lens)) / len(lengths),
+              "fraction of examples")
 
         feature_dim = self.config['feat_dim']
         pad_id = len(self.phone_to_id) - 1

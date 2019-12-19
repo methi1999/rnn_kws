@@ -167,6 +167,10 @@ class BatchTestModel:
         # Initialise model
         self.rnn = dl_model('test_one')
 
+        # Load std and mean values
+        with open(config['dir']['pickel'] + 'mean_std.pkl', 'rb') as f:
+            self.data_mean, self.data_std = pickle.load(f)
+
         # Load mapping
         try:
             file_name = config['dir']['dataset'] + 'lstm_mapping.json'
@@ -230,6 +234,7 @@ class BatchTestModel:
                                  nfilt=self.config['feat_dim'], winfunc=np.hamming)
 
             feat_log_full = np.log(feat)  # calculate log mel filterbank energies for complete file
+            feat_log_full = (feat_log_full-self.data_mean)/self.data_std
             to_return.append((feat_log_full, cur_phones, word))
 
         with open(self.pkl_name, 'wb') as f:
@@ -379,8 +384,8 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
         with open(results_dump_path, 'rb') as f:
             final_results = pickle.load(f)
     else:
-        keywords = ['oily', 'people', 'before', 'living', 'potatoes', 'children', 'overalls', 'morning', 'enough', 'system',
-                    'water', 'greasy', 'suit', 'dark', 'very', 'without', 'money']
+        keywords = ['oily', 'people', 'before', 'living', 'potatoes', 'children', 'overalls', 'morning', 'enough',
+                    'system', 'water', 'greasy', 'suit', 'dark', 'very', 'without', 'money']
 
         config = read_yaml()
         h_spike = config['h_spike']

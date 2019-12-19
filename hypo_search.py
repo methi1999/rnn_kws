@@ -2,6 +2,7 @@ import numpy as np
 from dl_model import dl_model
 from operator import add
 from copy import deepcopy
+import pickle
 
 # prevents underflow
 func = np.log
@@ -224,11 +225,11 @@ def find_q_values(s1, s2, s2_node_prob, prob_ins, prob_del, prob_replacement):
             final_dict[ph_id] = []
         final_dict[ph_id].append(inv_func(prob_substi + node_prob))
 
-    for insertion in op_dict['insertions']:
-        ph_id, prob = insertion[1], insertion[2]
-        if not ph_id in final_dict.keys():
-            final_dict[ph_id] = []
-        final_dict[ph_id].append(inv_func(prob))
+    # for insertion in op_dict['insertions']:
+    #     ph_id, prob = insertion[1], insertion[2]
+    #     if not ph_id in final_dict.keys():
+    #         final_dict[ph_id] = []
+    #     final_dict[ph_id].append(inv_func(prob))
 
     # print(final_dict)
     return final_dict
@@ -260,11 +261,13 @@ def read_grtruth(filepath):
 
 if __name__ == '__main__':
 
-    insert_prob, delete_prob, replace_prob = 0.5 * np.ones((39)), 0.5 * np.ones((39)), 0.5 * np.ones((39, 39))
+    insert_prob, delete_prob, replace_prob = pickle.load(open('pickle/probs.pkl', 'rb'))
     a = dl_model('test_one')
     outputs, phone_to_id, id_to_phone = a.test_one('trial/SI912.wav')
-    final_lattice = generate_lattice(outputs, 0.2, True, a.model.blank_token_id)
-    gr_phones = read_grtruth('trial/dark_suit.PHN')
+    # print(outputs.shape, np.max(outputs, axis=1))
+    # exit(0)
+    final_lattice = generate_lattice(outputs, 0.2, False, a.model.blank_token_id)
+    gr_phones = read_grtruth('trial/SI912.PHN')
     gr_phone_ids = np.array([phone_to_id[x][0] for x in gr_phones])
 
     res = traverse_best_lattice(final_lattice, gr_phone_ids, insert_prob, delete_prob, replace_prob)

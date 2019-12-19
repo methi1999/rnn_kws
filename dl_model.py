@@ -40,6 +40,8 @@ class dl_model():
             os.mkdir(self.config_file['dir']['models'])
         if not os.path.exists(self.config_file['dir']['plots']):
             os.mkdir(self.config_file['dir']['plots'])
+        if not os.path.exists(self.config_file['dir']['pickle']):
+            os.mkdir(self.config_file['dir']['pickle'])
 
         self.cuda = (self.config_file['cuda'] and torch.cuda.is_available())
 
@@ -63,10 +65,14 @@ class dl_model():
             self.train_losses, self.test_losses = [], []
             # declare model
             self.model = Model(self.config_file, weights=self.train_loader.weights)
+            # load means and deviations
+            self.data_mean, self.data_std = self.train_loader.data_mean, self.train_loader.data_std
 
         else:
 
             self.model = Model(self.config_file, weights=None)
+            with open(self.config_file['dir']['pickle'] + 'mean_std.pkl', 'rb') as f:
+                self.data_mean, self.data_std = pickle.load(f)
 
         if self.cuda:
             self.model.cuda()
@@ -260,19 +266,6 @@ class dl_model():
         test_loss /= len(self.test_loader)
         edit_dist_batch /= total_seq
 
-        # Calculate the probabilities of insertion, deletion and substitution
-        prob_insert, prob_del, prob_substi = np.zeros(num_ph), np.zeros(num_ph), np.zeros((num_ph, num_ph))
-        for ph, data in op_dict.items():
-            prob_insert[ph] = data['insertions'] / data['total']
-            prob_del[ph] = data['deletions'] / data['total']
-            prob_substi[ph] = data['substitutions'] / data['total']
-
-        # Dump
-        prob_dump_path = self.config_file['dir']['pickle'] + 'probs.pkl'
-        with open(prob_dump_path, 'wb') as f:
-            pickle.dump((prob_insert, prob_del, prob_substi), f)
-            print("Dumped probabilities")
-
         print("Edit distance - %.4f , Loss: %.7f" % (edit_dist_batch, test_loss))
 
         # Store in lists for keeping track of model performance
@@ -281,17 +274,30 @@ class dl_model():
 
         # if testing loss is minimum, store it as the 'best.pth' model, which is used for feature extraction
         # store only when doing train/test together i.e. mode is train
+        # dump probabilities
         if test_loss == min([x[0] for x in self.test_losses]) and self.mode == 'train':
             print("Best new model found!")
             self.model.save_model(True, epoch, self.train_losses, self.test_losses, self.edit_dist,
                                   self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
+            # Calculate the probabilities of insertion, deletion and substitution
+            prob_insert, prob_del, prob_substi = np.zeros(num_ph), np.zeros(num_ph), np.zeros((num_ph, num_ph))
+            for ph, data in op_dict.items():
+                prob_insert[ph] = data['insertions'] / data['total']
+                prob_del[ph] = data['deletions'] / data['total']
+                prob_substi[ph] = data['substitutions'] / data['total']
+
+            # Dump
+            prob_dump_path = self.config_file['dir']['pickle'] + 'probs.pkl'
+            with open(prob_dump_path, 'wb') as f:
+                pickle.dump((prob_insert, prob_del, prob_substi), f)
+                print("Dumped probabilities")
 
         return edit_dist_batch
 
     def test_one(self, file_path):
         """
         Called during feature extraction
-        :param file_path: file path t input .wav file to be tested
+        :param file_path: file path to input .wav file to be tested
         :return: predicted phone probabilities after after softmax layer
         """
 
@@ -302,10 +308,11 @@ class dl_model():
         feat, energy = fbank(sig, samplerate=rate, winlen=self.config_file['window_size'],
                              winstep=self.config_file['window_step'],
                              nfilt=self.config_file['feat_dim'], winfunc=np.hamming)
-
+        feat = np.log(feat)
+        feat = (feat-self.data_mean)/self.data_std
         tsteps, hidden_dim = feat.shape
         # calculate log mel filterbank energies for complete file and reshape so that it can be passed through model
-        feat_log_full = np.reshape(np.log(feat), (1, tsteps, hidden_dim))
+        feat_log_full = np.reshape(feat, (1, tsteps, hidden_dim))
         lens = np.array([tsteps])
         inputs, lens = torch.from_numpy(np.array(feat_log_full)).float(), torch.from_numpy(np.array(lens)).long()
 
@@ -344,10 +351,11 @@ class dl_model():
             feat, energy = fbank(sig, samplerate=rate, winlen=self.config_file['window_size'],
                                  winstep=self.config_file['window_step'],
                                  nfilt=self.config_file['feat_dim'], winfunc=np.hamming)
-
+            feat = np.log(feat)
+            feat = (feat - self.train_loader.data_mean) / self.train_loader.data_std
             tsteps, hidden_dim = feat.shape
             # calculate log mel filterbank energies for complete file
-            feat_log_full = np.reshape(np.log(feat), (1, tsteps, hidden_dim))
+            feat_log_full = np.reshape(feat, (1, tsteps, hidden_dim))
             lens = np.array([tsteps])
             # prepare tensors
             inputs, lens = torch.from_numpy(np.array(feat_log_full)).float(), torch.from_numpy(np.array(lens)).long()
@@ -575,12 +583,12 @@ def sample_to_frame(num, is_start, rate=16000, window=25, hop=10):
 
 
 if __name__ == '__main__':
-    # a = dl_model('train')
-    # a.train()
+    a = dl_model('train')
+    a.train()
     # a = dl_model('test')
     # a.test()
-    a = dl_model('test_one')
-    a.test_folder('trial/')
+    # a = dl_model('test_one')
+    # a.test_folder('trial/')
     # a = [1, 1, 2, 3, 4, 4, 5]
     # b = [1, 2, 2, 3, 4, 5]
     # print(edit_distance(a, b))

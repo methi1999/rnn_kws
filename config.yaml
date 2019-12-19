@@ -6,9 +6,9 @@ dir:
 
 train:
 
-  batch_size: 400
+  batch_size: 75
   
-  epochs: 1000 #total no. of epochs to train
+  epochs: 2000 #total no. of epochs to train
   
   test_per_epoch: 0 #test per epoch i.e. how many times in ONE epoch
   test_every_epoch: 25 #after how many epochs
@@ -20,11 +20,11 @@ train:
  
   loss_func: 'CTC' #loss function 
   optim: 'Adam' #optimiser to speed up training
-  lr: 0.00025 #learning rate
+  lr: 0.0005 #learning rate
 
 test:
 
-  batch_size: 400
+  batch_size: 75
 
 rnn: 'GRU'
 feat_dim: 38 #38 for log fitlerbank energies
@@ -40,4 +40,4 @@ bidirectional: True
 cuda: True #whether to use NVIDIA cuda
 
 h_spike: 0.2 #minimum node probability to be considered in lattice
-substi_prob_thesh_mult: 2 #replace 0 in substitution matrix with min/this value
+substi_prob_thesh_mult: 5 #replace 0 in substitution matrix with min/this value

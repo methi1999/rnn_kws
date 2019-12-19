@@ -57,6 +57,7 @@ class timit_data():
         # Each item in to_return is a list corresponding to a single recording
         # Each recording is in turn a list of tuples of (ph, feature_vector) for each frame
         to_return = []
+        list_features, list_phones = [], []
         base_pth = self.db_path + self.mode
         all_phones = set()
         # Phone distribution is used to calculate weights
@@ -109,10 +110,22 @@ class timit_data():
                         cur_phones.append(ph)
 
                     # Append current recording to the main list
-                    to_return.append((feat_log_full, cur_phones))
+                    list_features.append(feat_log_full)
+                    list_phones.append(cur_phones)
+
+        # Normalise feature vectors
+        np_arr = np.concatenate(list_features, axis=0)
+        print(np_arr.shape)
+        np_mean = np.mean(np_arr, axis=0)
+        np_std = np.std(np_arr, axis=0)
+        print("Mean:", np_mean, "\nStd. Dev:", np_std)
+
+        list_features = [(x-np_mean)/np_std for x in list_features]
+        to_return = list(zip(list_features, list_phones))
+
         # Dump pickle
         with open(self.pkl_name, 'wb') as f:
-            pickle.dump(to_return, f)
+            pickle.dump((to_return, np_mean, np_std), f)
             print("Dumped pickle")
 
         if self.mode == 'TRAIN':
@@ -132,10 +145,14 @@ class timit_data():
             with open(fname, 'w') as f:
                 json.dump(phones_to_id, f)
 
-        return to_return
+            # Dump mean and std
+            with open(self.config['dir']['pickle'] + 'mean_std.pkl', 'wb') as f:
+                pickle.dump((np_mean, np_std), f)
+
+        return to_return, np_mean, np_std
 
 
 if __name__ == '__main__':
-    config_file = {'dir': {'dataset': '../datasets/TIMIT/'}, 'feat_dim': 26}
-    a = timit_data('TRAIN', config_file)
+    config_file = {'dir': {'dataset': '../datasets/TEST/'}, 'feat_dim': 38}
+    a = timit_data('TEST', config_file)
     a.gen_pickle()
