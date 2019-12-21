@@ -22,11 +22,14 @@ def listdir(pth):
     return [x for x in os.listdir(pth) if x != '.DS_Store']
 
 
-def print_word_count(base_pth):
+def choose_keywords(base_pth, chosen_keywords, num_templates):
     """
-    prints the count of each word in the TIMIT TEST dataset. Can be used to choose keywords to be tested
+    Choose keywords from TIMIT TEST according to the minimum number of templates required
     :param base_pth: path to root directory TIMIT/TEST
+    :param chosen_keywords: list of keywords to be tested on
+    :param num_templates: the top-n templates which are chosen for every keyword
     """
+
     keywords = {}
 
     for dialect in sorted(listdir(base_pth)):
@@ -39,44 +42,78 @@ def print_word_count(base_pth):
             for wav_file in wav_files:
                 wav_path = os.path.join(base_pth, dialect, speaker_id, wav_file)
                 wrd_path = wav_path[:-3] + 'WRD'
+                ph_path = wav_path[:-3] + 'PHN'
 
-                with open(wrd_path, 'r') as f:
-                    wrd_list = f.readlines()
-                    for line in wrd_list:
-                        # extract word from sframe, eframe, word format
-                        word_start, word_end, word = line.split(' ')
-                        word = word[:-1]
-                        if word not in keywords.keys():
-                            keywords[word] = 0
-                        keywords[word] += 1
-    keywords = sorted(keywords.items(), key=operator.itemgetter(1))
-    print(keywords)
+                with open(wrd_path, 'r') as fw:
+                    wrd_list = list(fw.readlines())
+                with open(ph_path, 'r') as fp:
+                    ph_list = list(fp.readlines())
+
+                for line in wrd_list:
+                    phones_in_word = []
+                    # extract word from start sample, end sample, word format
+                    word_start, word_end, word = line.rstrip().split(' ')
+                    word_start, word_end = int(word_start), int(word_end)
+                    # add entry in dictionary
+                    if word not in keywords.keys():
+                        keywords[word] = {}
+                    # iterate over list of phones
+                    for ph_line in ph_list:
+                        # extract phones from start sample, end sample, phone format
+                        ph_start, ph_end, ph = ph_line.rstrip().split(' ')
+                        ph_start, ph_end = int(ph_start), int(ph_end)
+                        if ph_start == word_end:
+                            break
+                        # if phone corresponds to current word, add to list
+                        if ph_start >= word_start and ph_end <= word_end:
+                            # collapse
+                            for father, list_of_sons in replacement.items():
+                                if ph in list_of_sons:
+                                    ph = father
+                                    break
+                            phones_in_word.append(ph)
+
+                    phones_in_word = tuple(phones_in_word)
+                    # increment count in dictionary
+                    if phones_in_word not in keywords[word].keys():
+                        keywords[word][phones_in_word] = 0
+                    keywords[word][phones_in_word] += 1
+
+    # choose most frequently occurring templates from dictionary
+    final_templates = {}
+    for keyword in chosen_keywords:
+        temps = keywords[keyword]
+        temps = sorted(temps.items(), key=lambda kv: kv[1], reverse=True)
+        chosen = [x[0] for x in temps[:num_templates]]
+        final_templates[keyword] = chosen
+
+    return final_templates
 
 
-def gen_cases(base_pth, pkl_name, template_folder, num_templates, num_compares, keywords):
+def gen_cases(base_pth, pkl_name, num_templates, num_clips, num_none, keywords):
     """
     Generates test cases on which model is to be tested
     :param base_pth: root directory of TIMIT/TEST from where examples are picked
     :param pkl_name: path to pickle dump which stores list of paths
-    :param template_folder: folder where template .wav clips are stored
-    :param num_templates: templates per keyword
-    :param num_compares: number of clips containing the keyword on which we want to test
+    :param num_clips: number of clips containing the keyword on which we want to test
     :param keywords: list of keywords to be tested
+    :param num_templates: top-n templates to be returned for each keyword
+    :param num_none: number of clips which do not contain any keyword
     :return: {kw1: {'templates':[[phone_list 1], [phone_list 2],..], 'test_wav_paths':[parth1,path2,...]}, kw2:...}
     """
     if os.path.exists(pkl_name):
         with open(pkl_name, 'rb') as f:
             return pickle.load(f)
 
-    if not os.path.exists(template_folder):
-        os.mkdir(template_folder)
-
+    kws_chosen = choose_keywords(base_pth, keywords, num_templates)
     final_paths = {}
 
     paths = []
 
     for kw in keywords:
-        final_paths[kw] = {'templates': [], 'test_wav_paths': []}
+        final_paths[kw] = {'templates': kws_chosen[kw], 'test_wav_paths': []}
+
+    final_paths['NONE'] = {'templates': [], 'test_wav_paths': []}
 
     for dialect in sorted(listdir(base_pth)):
 
@@ -88,60 +125,29 @@ def gen_cases(base_pth, pkl_name, template_folder, num_templates, num_compares, 
             for wav_file in wav_files:
                 wav_path = os.path.join(base_pth, dialect, speaker_id, wav_file)
                 wrd_path = wav_path[:-3] + 'WRD'
-                phone_path = wrd_path[:-3] + 'PHN'
 
-                paths.append((wav_path, wrd_path, phone_path))
+                paths.append((wav_path, wrd_path))
 
     # shuffle paths
     np.random.shuffle(paths)
 
-    for wav_path, wrd_path, phone_path in paths:
+    for wav_path, wrd_path in paths:
 
         with open(wrd_path, 'r') as f:
             wrd_list = f.readlines()
 
-        with open(phone_path, 'r') as f:
-            phone_list = f.readlines()
-
         for line in wrd_list:
             # extract word from start frame, end frame, word format
-            word_start, word_end, word = line.split(' ')
-            word_start, word_end = int(word_start), int(word_end)
-            word = word[:-1]
+            word_start, word_end, word = line.rstrip().split(' ')
 
             if word in keywords:
-                # use this file as template
-                if len(final_paths[word]['templates']) < num_templates:
-                    list_of_phones = []
-
-                    for phone in phone_list:
-                        s_e_i = phone[:-1].split(' ')  # start, end, phenome_name e.g. 0 5432 'aa'
-                        start, end, ph = int(s_e_i[0]), int(s_e_i[1]), s_e_i[2]
-
-                        if start >= word_start and end <= word_end:
-                            # collapse into father phone
-                            for father, list_of_sons in replacement.items():
-                                if ph in list_of_sons:
-                                    ph = father
-                                    break
-                            list_of_phones.append(ph)
-
-                    # append to list of templates
-                    final_paths[word]['templates'].append(list_of_phones)
-                    # trim the .wav file and store only the keyword part
-                    dump_name = template_folder + word + '_' + str(len(final_paths[word]['templates'])) + '.wav'
-                    (rate, sig) = wav.read(wav_path)
-                    sig = sig[word_start:word_end + 1]
-                    wav.write(dump_name, rate, sig)
-
-                    print('Found keyword:', word, "in file", wav_path)
-
                 # use wav file to compare with keyword
-                elif len(final_paths[word]['test_wav_paths']) < num_compares:
+                if len(final_paths[word]['test_wav_paths']) < num_clips:
                     final_paths[word]['test_wav_paths'].append(wav_path)
-
-                else:
                     break
+            elif len(final_paths['NONE']) < num_none:
+                final_paths['NONE']['test_wav_paths'].append(wav_path)
+                break
 
     with open(pkl_name, 'wb') as f:
         pickle.dump(final_paths, f)
@@ -168,7 +174,7 @@ class BatchTestModel:
         self.rnn = dl_model('test_one')
 
         # Load std and mean values
-        with open(config['dir']['pickel'] + 'mean_std.pkl', 'rb') as f:
+        with open(config['dir']['dataset'] + 'mean_std.pkl', 'rb') as f:
             self.data_mean, self.data_std = pickle.load(f)
 
         # Load mapping
@@ -371,7 +377,7 @@ class BatchTestModel:
         return final_outs, self.phone_to_id
 
 
-def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
+def batch_test(num_templates, num_compares, num_none, pr_dump_path, results_dump_path):
     """
     Master function which carries out actual testing
     :param num_templates: number of templates for each keyword
@@ -384,8 +390,10 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
         with open(results_dump_path, 'rb') as f:
             final_results = pickle.load(f)
     else:
-        keywords = ['oily', 'people', 'before', 'living', 'potatoes', 'children', 'overalls', 'morning', 'enough',
-                    'system', 'water', 'greasy', 'suit', 'dark', 'very', 'without', 'money']
+        # keywords = ['oily', 'people', 'before', 'living', 'potatoes', 'children', 'overalls', 'morning', 'enough',
+        #             'system', 'water', 'greasy', 'suit', 'dark', 'very', 'without', 'money']
+        keywords = ['academic', 'reflect', 'equipment', 'program', 'rarely', 'national', 'social',
+                    'movies', 'greasy', 'water']
 
         config = read_yaml()
         h_spike = config['h_spike']
@@ -397,12 +405,12 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
 
         pkl_name = config['dir']['pickle'] + 'test_cases_' + str(num_templates) + '_' + str(num_compares) + '.pkl'
         # generate cases to be tested on
-        cases = gen_cases('../datasets/TIMIT/TEST/', pkl_name, 'templates/', num_templates, num_compares, keywords)
+        cases = gen_cases('../datasets/TIMIT/TEST/', pkl_name, num_templates, num_compares, num_none, keywords)
 
         # dictionary for storing c values required to declare keyword
         final_results = {}
         for kw in cases.keys():
-            final_results[kw] = {'right': [], 'wrong': []}
+            final_results[kw] = {}
 
         # initialise model
         a = BatchTestModel(config, cases)
@@ -417,13 +425,19 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
             cur_out = output[:length]
 
             # generate lattice from current predictions
-            final_lattice = generate_lattice(cur_out, h_spike, True, a.rnn.model.blank_token_id, print_final_lattice=False)
-            # node probabilites of full lattice. best only
+            final_lattice = generate_lattice(cur_out, h_spike, True, a.rnn.model.blank_token_id,
+                                             print_final_lattice=False)
+            # node probabilities of full lattice. (best only)
             node_prob = [x[0][1] for x in final_lattice]
             # compare with every template
             for template_word, templates in cases.items():
 
+                # if no keyword, then continue
+                if template_word == 'NONE':
+                    continue
+
                 templates = templates['templates']
+                final_results[template_word][i] = {'right': [], 'wrong': []}
 
                 for gr_phones in templates:
                     # template phone sequence
@@ -442,10 +456,10 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
 
                     if template_word == word_in_clip:
                         # gr_log_val should be < predicted_log_val + c
-                        final_results[template_word]['right'].append((gr_log_val, predicted_log_val))
+                        final_results[template_word][i]['right'].append((gr_log_val, predicted_log_val))
                     else:
                         # gr_log_val should be > predicted_log_val + c
-                        final_results[template_word]['wrong'].append((gr_log_val, predicted_log_val))
+                        final_results[template_word][i]['wrong'].append((gr_log_val, predicted_log_val))
 
         with open(results_dump_path, 'wb') as f:
             pickle.dump(final_results, f)
@@ -457,19 +471,28 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
     for c in cvals:
         prec_recall_dat[c] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
 
-    for res in final_results.values():
-        for gr, pred in res['right']:
-            for c in cvals:
-                if pred + c >= gr:
-                    prec_recall_dat[c]['tp'] += 1
+    # if any one of the templates match, declare keyword found, else not found
+    for c in cvals:
+        for word, res in final_results.items():
+            for iteration, d in res.items():
+                if len(d['right']):
+                    found = False
+                    for gr, pred in d['right']:
+                        if pred + c >= gr:
+                            found = True
+                    if found:
+                        prec_recall_dat[c]['tp'] += 1
+                    else:
+                        prec_recall_dat[c]['fn'] += 1
                 else:
-                    prec_recall_dat[c]['fn'] += 1
-        for gr, pred in res['wrong']:
-            for c in cvals:
-                if pred + c >= gr:
-                    prec_recall_dat[c]['fp'] += 1
-                else:
-                    prec_recall_dat[c]['tn'] += 1
+                    found = False
+                    for gr, pred in d['wrong']:
+                        if pred + c >= gr:
+                            found = True
+                    if found:
+                        prec_recall_dat[c]['fp'] += 1
+                    else:
+                        prec_recall_dat[c]['tn'] += 1
 
     # store metrics in dictionary
     fscore = []
@@ -486,5 +509,4 @@ def batch_test(num_templates, num_compares, pr_dump_path, results_dump_path):
 
 
 if __name__ == "__main__":
-    batch_test(3, 12, 'pr.json', 'pickle/final_res.pkl')
-    # print_word_count('../datasets/TIMIT/TEST/')
+    batch_test(3, 8, 170, 'pr.json', 'pickle/final_res.pkl')

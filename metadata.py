@@ -54,9 +54,6 @@ class timit_data():
 
         print("Generating pickle dump for", self.mode)
 
-        # Each item in to_return is a list corresponding to a single recording
-        # Each recording is in turn a list of tuples of (ph, feature_vector) for each frame
-        to_return = []
         list_features, list_phones = [], []
         base_pth = self.db_path + self.mode
         all_phones = set()
@@ -113,22 +110,22 @@ class timit_data():
                     list_features.append(feat_log_full)
                     list_phones.append(cur_phones)
 
-        # Normalise feature vectors
-        np_arr = np.concatenate(list_features, axis=0)
-        print(np_arr.shape)
-        np_mean = np.mean(np_arr, axis=0)
-        np_std = np.std(np_arr, axis=0)
-        print("Mean:", np_mean, "\nStd. Dev:", np_std)
-
-        list_features = [(x-np_mean)/np_std for x in list_features]
-        to_return = list(zip(list_features, list_phones))
-
-        # Dump pickle
-        with open(self.pkl_name, 'wb') as f:
-            pickle.dump((to_return, np_mean, np_std), f)
-            print("Dumped pickle")
+        # Each item in to_return is a list corresponding to a single recording
+        # Each recording is in turn a list of tuples of (ph, feature_vector) for each frame
 
         if self.mode == 'TRAIN':
+
+            # Normalise feature vectors
+            np_arr = np.concatenate(list_features, axis=0)
+            print(np_arr.shape)
+            np_mean = np.mean(np_arr, axis=0)
+            np_std = np.std(np_arr, axis=0)
+            # np_mean = np.zeros(np_mean.shape)
+            # np_std = np.ones(np_std.shape)
+            print("Mean:", np_mean, "\nStd. Dev:", np_std)
+
+            list_features = [(x - np_mean) / np_std for x in list_features]
+            to_return = list(zip(list_features, list_phones))
 
             # Weights are inversely proportional to number of phones encountered
             num_distribution = {k: 1 / v for k, v in num_distribution.items()}
@@ -146,10 +143,23 @@ class timit_data():
                 json.dump(phones_to_id, f)
 
             # Dump mean and std
-            with open(self.config['dir']['pickle'] + 'mean_std.pkl', 'wb') as f:
+            with open(self.db_path + 'mean_std.pkl', 'wb') as f:
                 pickle.dump((np_mean, np_std), f)
+            # Dump database
+            with open(self.pkl_name, 'wb') as f:
+                pickle.dump((to_return, np_mean, np_std), f)
+                print("Dumped pickle")
 
-        return to_return, np_mean, np_std
+            return to_return, np_mean, np_std
+        # if TEST, only dump database
+        else:
+            to_return = list(zip(list_features, list_phones))
+
+            with open(self.pkl_name, 'wb') as f:
+                pickle.dump(to_return, f)
+                print("Dumped pickle")
+
+            return to_return
 
 
 if __name__ == '__main__':

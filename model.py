@@ -63,7 +63,7 @@ class RNN(generic_model):
             self.optimizer = optim.Adam(self.parameters(), lr=config['train']['lr'])
             optim_found = True
 
-        if loss_found == False or optim_found == False:
+        if loss_found is False or optim_found is False:
             print("Can't find desired loss function/optimizer")
             exit(0)
 

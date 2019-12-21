@@ -20,13 +20,13 @@ train:
  
   loss_func: 'CTC' #loss function 
   optim: 'Adam' #optimiser to speed up training
-  lr: 0.0005 #learning rate
+  lr: 0.00025 #learning rate
 
 test:
 
-  batch_size: 75
+  batch_size: 200
 
-rnn: 'GRU'
+rnn: 'LSTM'
 feat_dim: 38 #38 for log fitlerbank energies
 window_size: 0.025 #25 milliseconds
 window_step: 0.010 #10 ms
@@ -40,4 +40,4 @@ bidirectional: True
 cuda: True #whether to use NVIDIA cuda
 
 h_spike: 0.2 #minimum node probability to be considered in lattice
-substi_prob_thesh_mult: 5 #replace 0 in substitution matrix with min/this value
+prob_thesh_const: 5 #replace 0 in substitution matrix with min/this value

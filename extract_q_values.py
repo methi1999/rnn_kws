@@ -46,7 +46,7 @@ class QValGenModel:
         # Initialise model
         self.rnn = dl_model('test_one')
 
-        with open(config['dir']['pickel'] + 'mean_std.pkl', 'rb') as f:
+        with open(config['dir']['dataset'] + 'mean_std.pkl', 'rb') as f:
             self.data_mean, self.data_std = pickle.load(f)
 
         # Load mapping of phone to id and std, mean
@@ -319,7 +319,7 @@ def find_batch_q(dump_path, min_phones):
     # load probabilities vectors
     with open(config['dir']['pickle'] + 'probs.pkl', 'rb') as f:
         insert_prob, delete_prob, replace_prob = pickle.load(f)
-        div = config['substi_prob_thesh_mult']
+        div = config['prob_thesh_const']
         temp = np.where(replace_prob == 0, 1, replace_prob)
         minimum = np.min(np.min(temp))
         print("Minimum substitution prob:", minimum)

@@ -71,7 +71,7 @@ class dl_model():
         else:
 
             self.model = Model(self.config_file, weights=None)
-            with open(self.config_file['dir']['pickle'] + 'mean_std.pkl', 'rb') as f:
+            with open(self.config_file['dir']['dataset'] + 'mean_std.pkl', 'rb') as f:
                 self.data_mean, self.data_std = pickle.load(f)
 
         if self.cuda:
@@ -209,6 +209,9 @@ class dl_model():
 
                 # retrieve batch from dataloader
                 inputs, labels, input_lens, label_lens, status = self.test_loader.return_batch()
+                # normalise inputs
+                inputs = (inputs-self.data_mean)/self.data_std
+                # convert to tensors
                 inputs, labels, input_lens, label_lens = torch.from_numpy(np.array(inputs)).float(), torch.from_numpy(
                     np.array(labels)).long(), torch.from_numpy(np.array(input_lens)).long(), torch.from_numpy(
                     np.array(label_lens)).long()
@@ -294,27 +297,35 @@ class dl_model():
 
         return edit_dist_batch
 
-    def test_one(self, file_path):
+    def test_one(self, file_paths):
         """
         Called during feature extraction
-        :param file_path: file path to input .wav file to be tested
+        :param file_paths: list of file paths to input .wav file to be tested
         :return: predicted phone probabilities after after softmax layer
         """
+        features, features_arr, lens = [], [], []
+        for file_path in file_paths:
+            # read .wav file
+            (rate, sig) = wav.read(file_path)
+            assert rate == 16000
+            # sig ranges from -32768 to +32768 AND NOT -1 to +1
+            feat, energy = fbank(sig, samplerate=rate, winlen=self.config_file['window_size'],
+                                 winstep=self.config_file['window_step'],
+                                 nfilt=self.config_file['feat_dim'], winfunc=np.hamming)
+            feat = np.log(feat)
+            feat = (feat-self.data_mean)/self.data_std
+            tsteps, hidden_dim = feat.shape
+            # calculate log mel filterbank energies for complete file and reshape so that it can be passed through model
+            features.append(feat)
+            lens.append(tsteps)
 
-        # read .wav file
-        (rate, sig) = wav.read(file_path)
-        assert rate == 16000
-        # sig ranges from -32768 to +32768 AND NOT -1 to +1
-        feat, energy = fbank(sig, samplerate=rate, winlen=self.config_file['window_size'],
-                             winstep=self.config_file['window_step'],
-                             nfilt=self.config_file['feat_dim'], winfunc=np.hamming)
-        feat = np.log(feat)
-        feat = (feat-self.data_mean)/self.data_std
-        tsteps, hidden_dim = feat.shape
-        # calculate log mel filterbank energies for complete file and reshape so that it can be passed through model
-        feat_log_full = np.reshape(feat, (1, tsteps, hidden_dim))
-        lens = np.array([tsteps])
-        inputs, lens = torch.from_numpy(np.array(feat_log_full)).float(), torch.from_numpy(np.array(lens)).long()
+        max_len = max([x.shape[0] for x in features])
+        for feat in features:
+            padding_l = max_len - feat.shape[0]
+            padded = np.append(feat, np.zeros((padding_l, feat.shape[1])), axis=0)
+            features_arr.append(padded)
+
+        inputs, lens = torch.from_numpy(np.array(features_arr)).float(), torch.from_numpy(np.array(lens)).long()
 
         self.model.eval()
 
@@ -324,13 +335,17 @@ class dl_model():
                 lens = lens.cuda()
 
             # Pass through model
-            outputs = self.model(inputs, lens).cpu().numpy()
-            # Since only one example per batch
-            outputs = outputs[0]
-            softmax = np.exp(outputs) / np.sum(np.exp(outputs), axis=1)[:, None]
+            outputs = self.model(inputs, lens).cpu()
+            # Apply softmax
+            softmax = torch.nn.functional.softmax(outputs, dim=2).numpy()
 
         id_to_phone = {v[0]: k for k, v in self.model.phone_to_id.items()}
-        return softmax, self.model.phone_to_id, id_to_phone
+
+        final_res = []
+        for i in range(softmax.shape[0]):
+            final_res.append(softmax[i][:lens[i]])
+
+        return final_res, self.model.phone_to_id, id_to_phone
 
     # Test for each wav file in the folder and also compares with ground truth if .PHN file exists
     def test_folder(self, test_folder):
@@ -588,6 +603,7 @@ if __name__ == '__main__':
     # a = dl_model('test')
     # a.test()
     # a = dl_model('test_one')
+    # a.test_one(['trial/SX36.wav', 'trial/SX233.wav'])
     # a.test_folder('trial/')
     # a = [1, 1, 2, 3, 4, 4, 5]
     # b = [1, 2, 2, 3, 4, 5]

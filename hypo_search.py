@@ -7,6 +7,7 @@ import pickle
 # prevents underflow
 func = np.log
 inv_func = np.exp
+min_cons = 2
 
 
 def edit_distance(s1, s2, prob_ins, prob_del, prob_replacement):
@@ -91,18 +92,18 @@ def generate_lattice(outputs, h_node, best_only, blank_token_id, collapse_type='
                 prev_probs = [max(prev_probs[i], vals[i]) for i in range(len(prev_probs))]
 
         else:
-            if collapse_type == 'sum':
+            if collapse_type == 'sum' and num > min_cons:
                 final_lattice.append(list(zip(previous_phones, [x / num for x in prev_probs])))
-            elif collapse_type == 'max':
+            elif collapse_type == 'max' and num > min_cons:
                 final_lattice.append(list(zip(previous_phones, prev_probs)))
 
             previous_phones = ids
             prev_probs = vals
             num = 1
     # for the last sequence
-    if collapse_type == 'sum':
+    if collapse_type == 'sum' and num > min_cons:
         final_lattice.append(list(zip(previous_phones, [x / num for x in prev_probs])))
-    else:
+    elif collapse_type == 'max' and num > min_cons:
         final_lattice.append(list(zip(previous_phones, prev_probs)))
 
     if print_final_lattice:
@@ -179,7 +180,7 @@ def find_q_values(s1, s2, s2_node_prob, prob_ins, prob_del, prob_replacement):
         for j in range(n + 1):
             if i == 0:
                 dp[i][j] = np.sum(prob_ins[s2[:j]])
-                op_dict[i][j]['insertions'] = [(idx, s2[idx], prob_ins[s2[idx]]) for idx in range(j)]
+                op_dict[i][j]['insertions'] = [(idx, s2[idx], prob_ins[s2[idx]], s2_node_prob[idx]) for idx in range(j)]
             elif j == 0:
                 dp[i][j] = np.sum(prob_del[s1[:i]])
                 op_dict[i][j]['deletions'] = [(idx, s1[idx], prob_del[s1[idx]]) for idx in range(i)]
@@ -197,7 +198,7 @@ def find_q_values(s1, s2, s2_node_prob, prob_ins, prob_del, prob_replacement):
                     op_dict[i][j]['deletions'].append((i - 1, s1[i - 1], prob_del[s1[i - 1]]))
                 elif dp[i][j] == dp[i][j - 1] + insert:
                     op_dict[i][j] = deepcopy(op_dict[i][j - 1])
-                    op_dict[i][j]['insertions'].append((j - 1, s2[j - 1], prob_ins[s2[j - 1]]))
+                    op_dict[i][j]['insertions'].append((j - 1, s2[j - 1], prob_ins[s2[j - 1]], s2_node_prob[j-1]))
                 else:
                     op_dict[i][j] = deepcopy(op_dict[i - 1][j - 1])
                     op_dict[i][j]['substitutions'].append((i - 1, s1[i - 1], j - 1, s2[j - 1],
@@ -225,11 +226,11 @@ def find_q_values(s1, s2, s2_node_prob, prob_ins, prob_del, prob_replacement):
             final_dict[ph_id] = []
         final_dict[ph_id].append(inv_func(prob_substi + node_prob))
 
-    # for insertion in op_dict['insertions']:
-    #     ph_id, prob = insertion[1], insertion[2]
-    #     if not ph_id in final_dict.keys():
-    #         final_dict[ph_id] = []
-    #     final_dict[ph_id].append(inv_func(prob))
+    for insertion in op_dict['insertions']:
+        ph_id, prob, node_prob = insertion[1], insertion[2], insertion[3]
+        if not ph_id in final_dict.keys():
+            final_dict[ph_id] = []
+        final_dict[ph_id].append(inv_func(prob + node_prob))
 
     # print(final_dict)
     return final_dict
@@ -263,10 +264,11 @@ if __name__ == '__main__':
 
     insert_prob, delete_prob, replace_prob = pickle.load(open('pickle/probs.pkl', 'rb'))
     a = dl_model('test_one')
-    outputs, phone_to_id, id_to_phone = a.test_one('trial/SI912.wav')
+    outputs, phone_to_id, id_to_phone = a.test_one(['trial/SI912.wav'])
+    outputs = outputs[0]
     # print(outputs.shape, np.max(outputs, axis=1))
-    # exit(0)
     final_lattice = generate_lattice(outputs, 0.2, False, a.model.blank_token_id)
+    # exit(0)
     gr_phones = read_grtruth('trial/SI912.PHN')
     gr_phone_ids = np.array([phone_to_id[x][0] for x in gr_phones])
 

@@ -24,7 +24,7 @@ class timit_loader():
         if type_ == 'train':
             list_of_sent, self.data_mean, self.data_std = metadata.gen_pickle()
         else:
-            list_of_sent, _, _ = metadata.gen_pickle()
+            list_of_sent = metadata.gen_pickle()
 
         self.mode = type_  # train/test/test-one
         self.batch_size = config_file[type_]['batch_size']
@@ -61,6 +61,7 @@ class timit_loader():
         avg, std = np.mean(lengths), np.std(lengths)
         max_allowed = int(avg + std * self.config['std_multiplier'])
         list_of_sent = [x for x in list_of_sent if len(x[0]) <= max_allowed]
+
         sent_lens = [len(x[0]) for x in list_of_sent]
         label_lens = [len(x[1]) for x in list_of_sent]
         max_l = max(sent_lens)
