@@ -46,10 +46,7 @@ class QValGenModel:
         # Initialise model
         self.rnn = dl_model('test_one')
 
-        with open(config['dir']['dataset'] + 'mean_std.pkl', 'rb') as f:
-            self.data_mean, self.data_std = pickle.load(f)
-
-        # Load mapping of phone to id and std, mean
+        # Load mapping of phone to id
         try:
             file_name = config['dir']['dataset'] + 'lstm_mapping.json'
             with open(file_name, 'r') as f:
@@ -153,7 +150,6 @@ class QValGenModel:
                                  nfilt=self.config['feat_dim'], winfunc=np.hamming)
 
             feat_log_full = np.log(feat)  # calculate log mel filterbank energies for complete file
-            feat_log_full = (feat_log_full-self.data_mean)/self.data_std
             to_return.append((feat_log_full, cur_phones))
 
         print("Final phone count dict:", ph_count_dict)

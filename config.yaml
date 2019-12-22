@@ -26,7 +26,7 @@ test:
 
   batch_size: 200
 
-rnn: 'LSTM'
+rnn: 'GRU'
 feat_dim: 38 #38 for log fitlerbank energies
 window_size: 0.025 #25 milliseconds
 window_step: 0.010 #10 ms

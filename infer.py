@@ -144,14 +144,17 @@ def gen_cases(base_pth, pkl_name, num_templates, num_clips, num_none, keywords):
                 # use wav file to compare with keyword
                 if len(final_paths[word]['test_wav_paths']) < num_clips:
                     final_paths[word]['test_wav_paths'].append(wav_path)
-                    break
-            elif len(final_paths['NONE']) < num_none:
+                break
+
+            elif len(final_paths['NONE']['test_wav_paths']) < num_none:
                 final_paths['NONE']['test_wav_paths'].append(wav_path)
                 break
 
     with open(pkl_name, 'wb') as f:
         pickle.dump(final_paths, f)
 
+    print('Number of templates:', {word:len(dat['templates']) for word, dat in final_paths.items()})
+    print('Number of clips:', {word: len(dat['test_wav_paths']) for word, dat in final_paths.items()})
     return final_paths
 
 
@@ -172,10 +175,6 @@ class BatchTestModel:
         self.model_out_path = config['dir']['pickle'] + 'BatchTestModel_out.pkl'
         # Initialise model
         self.rnn = dl_model('test_one')
-
-        # Load std and mean values
-        with open(config['dir']['dataset'] + 'mean_std.pkl', 'rb') as f:
-            self.data_mean, self.data_std = pickle.load(f)
 
         # Load mapping
         try:
@@ -240,7 +239,6 @@ class BatchTestModel:
                                  nfilt=self.config['feat_dim'], winfunc=np.hamming)
 
             feat_log_full = np.log(feat)  # calculate log mel filterbank energies for complete file
-            feat_log_full = (feat_log_full-self.data_mean)/self.data_std
             to_return.append((feat_log_full, cur_phones, word))
 
         with open(self.pkl_name, 'wb') as f:
@@ -392,8 +390,9 @@ def batch_test(num_templates, num_compares, num_none, pr_dump_path, results_dump
     else:
         # keywords = ['oily', 'people', 'before', 'living', 'potatoes', 'children', 'overalls', 'morning', 'enough',
         #             'system', 'water', 'greasy', 'suit', 'dark', 'very', 'without', 'money']
-        keywords = ['academic', 'reflect', 'equipment', 'program', 'rarely', 'national', 'social',
+        keywords = ['academic', 'reflect', 'equipment', 'program', 'rarely', 'national', 'social',\
                     'movies', 'greasy', 'water']
+        # keywords = ['oily', 'people', 'before', 'living', 'water', 'children']
 
         config = read_yaml()
         h_spike = config['h_spike']
@@ -403,9 +402,10 @@ def batch_test(num_templates, num_compares, num_none, pr_dump_path, results_dump
         thresholds, insert_prob, delete_prob, replace_prob = find_batch_q(config['dir']['pickle'] + 'final_q_vals.pkl',
                                                                           min_phones=50)
 
-        pkl_name = config['dir']['pickle'] + 'test_cases_' + str(num_templates) + '_' + str(num_compares) + '.pkl'
+        pkl_name = config['dir']['pickle'] + 'test_cases_' + str(num_templates) + '_' +\
+                   str(num_compares) + '_' + str(num_none) + '.pkl'
         # generate cases to be tested on
-        cases = gen_cases('../datasets/TIMIT/TEST/', pkl_name, num_templates, num_compares, num_none, keywords)
+        cases = gen_cases('../datasets/TIMIT/TRAIN/', pkl_name, num_templates, num_compares, num_none, keywords)
 
         # dictionary for storing c values required to declare keyword
         final_results = {}
@@ -437,7 +437,7 @@ def batch_test(num_templates, num_compares, num_none, pr_dump_path, results_dump
                     continue
 
                 templates = templates['templates']
-                final_results[template_word][i] = {'right': [], 'wrong': []}
+                final_results[template_word][i] = []
 
                 for gr_phones in templates:
                     # template phone sequence
@@ -456,10 +456,10 @@ def batch_test(num_templates, num_compares, num_none, pr_dump_path, results_dump
 
                     if template_word == word_in_clip:
                         # gr_log_val should be < predicted_log_val + c
-                        final_results[template_word][i]['right'].append((gr_log_val, predicted_log_val))
+                        final_results[template_word][i].append((gr_log_val, predicted_log_val, 'right'))
                     else:
                         # gr_log_val should be > predicted_log_val + c
-                        final_results[template_word][i]['wrong'].append((gr_log_val, predicted_log_val))
+                        final_results[template_word][i].append((gr_log_val, predicted_log_val, 'wrong'))
 
         with open(results_dump_path, 'wb') as f:
             pickle.dump(final_results, f)
@@ -475,9 +475,9 @@ def batch_test(num_templates, num_compares, num_none, pr_dump_path, results_dump
     for c in cvals:
         for word, res in final_results.items():
             for iteration, d in res.items():
-                if len(d['right']):
+                if d[0][2] == 'right':
                     found = False
-                    for gr, pred in d['right']:
+                    for gr, pred, _ in d:
                         if pred + c >= gr:
                             found = True
                     if found:
@@ -486,7 +486,7 @@ def batch_test(num_templates, num_compares, num_none, pr_dump_path, results_dump
                         prec_recall_dat[c]['fn'] += 1
                 else:
                     found = False
-                    for gr, pred in d['wrong']:
+                    for gr, pred, _ in d:
                         if pred + c >= gr:
                             found = True
                     if found:

@@ -124,9 +124,6 @@ class timit_data():
             # np_std = np.ones(np_std.shape)
             print("Mean:", np_mean, "\nStd. Dev:", np_std)
 
-            list_features = [(x - np_mean) / np_std for x in list_features]
-            to_return = list(zip(list_features, list_phones))
-
             # Weights are inversely proportional to number of phones encountered
             num_distribution = {k: 1 / v for k, v in num_distribution.items()}
             total_ph = sum(num_distribution.values())
@@ -142,24 +139,14 @@ class timit_data():
             with open(fname, 'w') as f:
                 json.dump(phones_to_id, f)
 
-            # Dump mean and std
-            with open(self.db_path + 'mean_std.pkl', 'wb') as f:
-                pickle.dump((np_mean, np_std), f)
-            # Dump database
-            with open(self.pkl_name, 'wb') as f:
-                pickle.dump((to_return, np_mean, np_std), f)
-                print("Dumped pickle")
+        to_return = list(zip(list_features, list_phones))
 
-            return to_return, np_mean, np_std
-        # if TEST, only dump database
-        else:
-            to_return = list(zip(list_features, list_phones))
+        # Dump database
+        with open(self.pkl_name, 'wb') as f:
+            pickle.dump(to_return, f)
+            print("Dumped pickle")
 
-            with open(self.pkl_name, 'wb') as f:
-                pickle.dump(to_return, f)
-                print("Dumped pickle")
-
-            return to_return
+        return to_return
 
 
 if __name__ == '__main__':

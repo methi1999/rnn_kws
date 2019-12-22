@@ -20,11 +20,7 @@ class timit_loader():
 
         metadata = timit_data(type_.upper(), config_file)
         # Returns huge list of feature vectors of audio recordings and phones as a tuple for each frame
-
-        if type_ == 'train':
-            list_of_sent, self.data_mean, self.data_std = metadata.gen_pickle()
-        else:
-            list_of_sent = metadata.gen_pickle()
+        list_of_sent = metadata.gen_pickle()
 
         self.mode = type_  # train/test/test-one
         self.batch_size = config_file[type_]['batch_size']

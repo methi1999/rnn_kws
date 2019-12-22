@@ -65,14 +65,10 @@ class dl_model():
             self.train_losses, self.test_losses = [], []
             # declare model
             self.model = Model(self.config_file, weights=self.train_loader.weights)
-            # load means and deviations
-            self.data_mean, self.data_std = self.train_loader.data_mean, self.train_loader.data_std
 
         else:
 
             self.model = Model(self.config_file, weights=None)
-            with open(self.config_file['dir']['dataset'] + 'mean_std.pkl', 'rb') as f:
-                self.data_mean, self.data_std = pickle.load(f)
 
         if self.cuda:
             self.model.cuda()
@@ -209,8 +205,6 @@ class dl_model():
 
                 # retrieve batch from dataloader
                 inputs, labels, input_lens, label_lens, status = self.test_loader.return_batch()
-                # normalise inputs
-                inputs = (inputs-self.data_mean)/self.data_std
                 # convert to tensors
                 inputs, labels, input_lens, label_lens = torch.from_numpy(np.array(inputs)).float(), torch.from_numpy(
                     np.array(labels)).long(), torch.from_numpy(np.array(input_lens)).long(), torch.from_numpy(
@@ -313,7 +307,6 @@ class dl_model():
                                  winstep=self.config_file['window_step'],
                                  nfilt=self.config_file['feat_dim'], winfunc=np.hamming)
             feat = np.log(feat)
-            feat = (feat-self.data_mean)/self.data_std
             tsteps, hidden_dim = feat.shape
             # calculate log mel filterbank energies for complete file and reshape so that it can be passed through model
             features.append(feat)
@@ -367,7 +360,6 @@ class dl_model():
                                  winstep=self.config_file['window_step'],
                                  nfilt=self.config_file['feat_dim'], winfunc=np.hamming)
             feat = np.log(feat)
-            feat = (feat - self.train_loader.data_mean) / self.train_loader.data_std
             tsteps, hidden_dim = feat.shape
             # calculate log mel filterbank energies for complete file
             feat_log_full = np.reshape(feat, (1, tsteps, hidden_dim))

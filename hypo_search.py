@@ -7,7 +7,6 @@ import pickle
 # prevents underflow
 func = np.log
 inv_func = np.exp
-min_cons = 2
 
 
 def edit_distance(s1, s2, prob_ins, prob_del, prob_replacement):
@@ -67,21 +66,14 @@ def generate_lattice(outputs, h_node, best_only, blank_token_id, collapse_type='
                 if outputs[i][j] >= h_node:
                     init_lattice[i].append((j, outputs[i][j]))
 
-    # Remove blank tokens
-    lattice = []
-    for frame in init_lattice:
-        cur = [x for x in frame if x[0] != blank_token_id]
-        if len(cur) != 0:
-            lattice.append(cur)
-
     # Collapse consecutive
-    final_lattice = []
+    lattice = []
 
-    previous_phones = [x[0] for x in lattice[0]]
-    prev_probs = [x[1] for x in lattice[0]]
+    previous_phones = [x[0] for x in init_lattice[0]]
+    prev_probs = [x[1] for x in init_lattice[0]]
     num = 1
 
-    for l in lattice[1:]:
+    for l in init_lattice[1:]:
         ids, vals = [x[0] for x in l], [x[1] for x in l]
 
         if ids == previous_phones:
@@ -92,19 +84,26 @@ def generate_lattice(outputs, h_node, best_only, blank_token_id, collapse_type='
                 prev_probs = [max(prev_probs[i], vals[i]) for i in range(len(prev_probs))]
 
         else:
-            if collapse_type == 'sum' and num > min_cons:
-                final_lattice.append(list(zip(previous_phones, [x / num for x in prev_probs])))
-            elif collapse_type == 'max' and num > min_cons:
-                final_lattice.append(list(zip(previous_phones, prev_probs)))
+            if collapse_type == 'sum':
+                lattice.append(list(zip(previous_phones, [x / num for x in prev_probs])))
+            elif collapse_type == 'max':
+                lattice.append(list(zip(previous_phones, prev_probs)))
 
             previous_phones = ids
             prev_probs = vals
             num = 1
     # for the last sequence
-    if collapse_type == 'sum' and num > min_cons:
-        final_lattice.append(list(zip(previous_phones, [x / num for x in prev_probs])))
-    elif collapse_type == 'max' and num > min_cons:
-        final_lattice.append(list(zip(previous_phones, prev_probs)))
+    if collapse_type == 'sum':
+        lattice.append(list(zip(previous_phones, [x / num for x in prev_probs])))
+    elif collapse_type == 'max':
+        lattice.append(list(zip(previous_phones, prev_probs)))
+
+    # Remove blank tokens
+    final_lattice = []
+    for frame in lattice:
+        cur = [x for x in frame if x[0] != blank_token_id]
+        if len(cur) != 0:
+            final_lattice.append(cur)
 
     if print_final_lattice:
         print('Final lattice:', final_lattice)
@@ -266,12 +265,13 @@ if __name__ == '__main__':
     a = dl_model('test_one')
     outputs, phone_to_id, id_to_phone = a.test_one(['trial/SI912.wav'])
     outputs = outputs[0]
-    # print(outputs.shape, np.max(outputs, axis=1))
+    # print(outputs.shape, np.max(outputs, axis=1), outputs)
     final_lattice = generate_lattice(outputs, 0.2, False, a.model.blank_token_id)
-    # exit(0)
+
     gr_phones = read_grtruth('trial/SI912.PHN')
     gr_phone_ids = np.array([phone_to_id[x][0] for x in gr_phones])
-
+    print(gr_phone_ids)
+    exit(0)
     res = traverse_best_lattice(final_lattice, gr_phone_ids, insert_prob, delete_prob, replace_prob)
 
     res_phones = [id_to_phone[x] for x in res]
