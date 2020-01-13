@@ -38,6 +38,7 @@ weighted_loss: True
 std_multiplier: 5
 bidirectional: True
 cuda: True #whether to use NVIDIA cuda
+decode_type: 'max' #max or CTC
 
 h_spike: 0.2 #minimum node probability to be considered in lattice
-prob_thesh_const: 5 #replace 0 in substitution matrix with min/this value
+prob_thesh_const: 10 #replace 0 in substitution matrix with min/this value

@@ -15,6 +15,7 @@ from read_yaml import read_yaml
 from dataloader import timit_loader
 import scipy.io.wavfile as wav
 from python_speech_features import fbank
+from beam_search import decode
 
 
 class dl_model():
@@ -188,6 +189,8 @@ class dl_model():
         edit_dist_batch = 0
         # number of sequences
         total_seq = 0
+        # decode type
+        decode_type = self.config_file['decode_type']
         # operations dictionary for calculating probabilities
         num_ph = self.model.num_phones
         op_dict = {}
@@ -198,6 +201,8 @@ class dl_model():
         print("Testing...")
         print('Total batches:', len(self.test_loader))
         test_loss = 0
+
+        k = 0
 
         with torch.no_grad():
 
@@ -222,25 +227,33 @@ class dl_model():
                 outputs = self.model(inputs, input_lens)
                 loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
                 test_loss += loss.item()
-                # increment number of examples
-                total_seq += outputs.shape[0]
 
                 outputs = outputs.cpu().numpy()
                 labels = labels.cpu().numpy()
-                # argmax over the phone channel
-                argmaxed = np.argmax(outputs, axis=2)
+
+                k += outputs.shape[0]
 
                 # calculated edit distance between ground truth and predicted sequence
                 for i in range(outputs.shape[0]):
-                    # predicted
-                    seq = list(argmaxed[i][:input_lens[i]])
+                    # predict by argmax
+                    if decode_type == 'max':
+                        # argmax over the phone channel
+                        argmaxed = np.argmax(outputs, axis=2)
+                        seq = list(argmaxed[i][:input_lens[i]])
+                        # collapse neighbouring and remove blank token
+                        ctc_out = ctc_collapse(seq, self.model.blank_token_id)
+                    else:
+                        # predict by CTC
+                        ctc_out = decode(outputs[i][:input_lens[i], :], 1, self.model.blank_token_id)[0][0]
+
                     # ground truth
                     gr_truth = list(labels[i][:label_lens[i]])
-                    # collapse neighbouring and remove blank token
-                    ctc_out = ctc_collapse(seq, self.model.blank_token_id)
 
                     # calculated edit distance and required operations
                     dist, opr = edit_distance(gr_truth, ctc_out)
+
+                    # increment number of examples
+                    total_seq += len(gr_truth)
 
                     # update number of operations
                     for op_type, ids in opr.items():
@@ -252,18 +265,18 @@ class dl_model():
                             for idx in ids:
                                 op_dict[idx][op_type] += 1
                                 op_dict[idx]['total'] += 1
-                    edit_dist_batch += dist / (max(len(seq), len(ctc_out)))
+                    edit_dist_batch += dist
 
                 if status == 1:
                     break
 
-                print("Done with:", total_seq, '/', self.test_loader.num_egs)
+                print("Done with:", k, '/', self.test_loader.num_egs)
 
         # Average out the losses and edit distance
         test_loss /= len(self.test_loader)
         edit_dist_batch /= total_seq
 
-        print("Edit distance - %.4f , Loss: %.7f" % (edit_dist_batch, test_loss))
+        print("Edit distance - %.4f %% , Loss: %.7f" % (edit_dist_batch*100, test_loss))
 
         # Store in lists for keeping track of model performance
         self.edit_dist.append((edit_dist_batch, epoch))
@@ -284,7 +297,7 @@ class dl_model():
                 prob_substi[ph] = data['substitutions'] / data['total']
 
             # Dump
-            prob_dump_path = self.config_file['dir']['pickle'] + 'probs.pkl'
+            prob_dump_path = self.config_file['dir']['pickle'] + 'probs_new.pkl'
             with open(prob_dump_path, 'wb') as f:
                 pickle.dump((prob_insert, prob_del, prob_substi), f)
                 print("Dumped probabilities")
@@ -590,10 +603,10 @@ def sample_to_frame(num, is_start, rate=16000, window=25, hop=10):
 
 
 if __name__ == '__main__':
-    a = dl_model('train')
-    a.train()
-    # a = dl_model('test')
-    # a.test()
+    # a = dl_model('train')
+    # a.train()
+    a = dl_model('test')
+    a.test()
     # a = dl_model('test_one')
     # a.test_one(['trial/SX36.wav', 'trial/SX233.wav'])
     # a.test_folder('trial/')

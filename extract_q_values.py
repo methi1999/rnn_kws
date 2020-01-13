@@ -60,7 +60,6 @@ class QValGenModel:
             print("Can't find phone mapping")
             exit(0)
 
-
     def gen_pickle(self):
         """
         # Iterates over the TEST dataset and picks up recordings such that each phone is covered atleast x no of times
@@ -283,11 +282,14 @@ class QValGenModel:
         return final_outs, self.phone_to_id
 
 
-def find_batch_q(dump_path, min_phones):
+def find_batch_q(dump_path, min_phones, dec_type, top_n, exp_factor=1):
     """
     Computes the q-vale for each phone averaged over a specified number of instances
     :param dump_path: path to dump file
     :param min_phones: minimum number of phones to be covered
+    :param dec_type: max or CTC
+    :param top_n: top_n sequences to be considered
+    :param exp_factor: weight assigned to probability score
     :return: a dictionary of q-value for each phone and probabilities for insertion, deletion, substitution
     """
 
@@ -296,9 +298,6 @@ def find_batch_q(dump_path, min_phones):
             vals = pickle.load(f)
             print('Loaded Q values from dump:', vals[0])
             return vals
-
-    # minimum node probability to qualify as a candidate
-    h_spike = 0.2
 
     config = read_yaml()
 
@@ -316,13 +315,27 @@ def find_batch_q(dump_path, min_phones):
     with open(config['dir']['pickle'] + 'probs.pkl', 'rb') as f:
         insert_prob, delete_prob, replace_prob = pickle.load(f)
         div = config['prob_thesh_const']
+
         temp = np.where(replace_prob == 0, 1, replace_prob)
         minimum = np.min(np.min(temp))
         print("Minimum substitution prob:", minimum)
-        replace_prob = np.where(replace_prob == 0, minimum/div, replace_prob)
-        print("Probabilities:\nInsert:", insert_prob, '\nDelete:', delete_prob, '\nSubsti:', replace_prob)
+        replace_prob = np.where(replace_prob == 0, minimum / div, replace_prob)
+
+        temp = np.where(insert_prob == 0, 1, insert_prob)
+        minimum = np.min(temp)
+        print("Minimum insertion prob:", minimum)
+        insert_prob = np.where(insert_prob == 0, minimum / div, insert_prob)
+
+        temp = np.where(delete_prob == 0, 1, delete_prob)
+        minimum = np.min(temp)
+        print("Minimum deletion prob:", minimum)
+        delete_prob = np.where(delete_prob == 0, minimum / div, delete_prob)
 
     final_dict = {}
+    insert_prob, delete_prob, replace_prob = np.power(insert_prob, exp_factor), np.power(delete_prob, exp_factor), \
+                                             np.power(replace_prob, exp_factor)
+
+    print("Probabilities:\nInsert:", insert_prob, '\nDelete:', delete_prob, '\nSubsti:', replace_prob)
 
     # for each sentence in database, find best subsequence, align and caluclate q values
     for i, (output, length, gr_phone, label_lens) in enumerate(db):
@@ -331,11 +344,12 @@ def find_batch_q(dump_path, min_phones):
         gr_phone_ids = np.array(gr_phone[:label_lens])
 
         # Generate lattice from current predictions
-        final_lattice = generate_lattice(cur_out, h_spike, True, a.rnn.model.blank_token_id, print_final_lattice=False)
+        lattices = generate_lattice(cur_out, a.rnn.model.blank_token_id, dec_type, top_n)
         # Find best subsequence in lattice
-        res = traverse_best_lattice(final_lattice, gr_phone_ids, insert_prob, delete_prob, replace_prob)
+        res, final_lattice = traverse_best_lattice(lattices, dec_type, gr_phone_ids, insert_prob, delete_prob,
+                                                   replace_prob)
         # Calculate q values by comparing template and best match
-        q_vals = find_q_values(gr_phone_ids, res, [x[0][1] for x in final_lattice],
+        q_vals = find_q_values(gr_phone_ids, res, [x[1] for x in final_lattice],
                                insert_prob, delete_prob, replace_prob)
 
         # Add them up
@@ -354,4 +368,4 @@ def find_batch_q(dump_path, min_phones):
 
 
 if __name__ == '__main__':
-    find_batch_q('pickle/final_q_vals.pkl', min_phones=75)
+    find_batch_q('pickle/final_q_vals.pkl', dec_type='max', min_phones=75, top_n=5)
