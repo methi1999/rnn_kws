@@ -1,6 +1,6 @@
 import numpy as np
 from dl_model import dl_model
-from operator import add
+import utils
 from copy import deepcopy
 import pickle
 import beam_search
@@ -172,7 +172,9 @@ def generate_lattice(outputs, blank_token_id, decode_type, top_n, collapse_type=
             to_return.append(final_lattice)
 
         if print_final_lattice:
-            print('Final lattices', to_return)
+            print('Final lattices')
+            for l in to_return:
+                print(l)
 
         return to_return
 
@@ -349,10 +351,7 @@ def find_q_values(s1, s2, s2_node_prob, prob_ins, prob_del, prob_replacement):
 
 def read_grtruth(filepath):
     # phones to be collapsed
-    replacement = {'aa': ['ao'], 'ah': ['ax', 'ax-h'], 'er': ['axr'], 'hh': ['hv'], 'ih': ['ix'],
-                   'l': ['el'], 'm': ['em'], 'n': ['en', 'nx'], 'ng': ['eng'], 'sh': ['zh'],
-                   'pau': ['pcl', 'tcl', 'kcl', 'bcl', 'dcl', 'gcl', 'h#', 'epi', 'q'],
-                   'uw': ['ux']}
+    replacement = utils.replacement_dict()
 
     gr_phones = []
     with open(filepath, 'r') as f:

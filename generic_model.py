@@ -55,7 +55,7 @@ class generic_model(nn.Module):
 
                 checkpoint = torch.load(filename, map_location=lambda storage, loc: storage)
                 # load model parameters
-                print(filename)
+                print("Loading:", filename)
                 self.load_state_dict(checkpoint['model_state_dict'])
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 print("Loaded pretrained model from:", filename)

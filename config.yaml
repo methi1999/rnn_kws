@@ -6,9 +6,9 @@ dir:
 
 train:
 
-  batch_size: 75
+  batch_size: 100
   
-  epochs: 2000 #total no. of epochs to train
+  epochs: 1500 #total no. of epochs to train
   
   test_per_epoch: 0 #test per epoch i.e. how many times in ONE epoch
   test_every_epoch: 25 #after how many epochs
@@ -24,21 +24,26 @@ train:
 
 test:
 
-  batch_size: 200
+  batch_size: 100
 
-rnn: 'GRU'
-feat_dim: 38 #38 for log fitlerbank energies
+
+n_fbank: 40 # 40 for fitlerbank energies
+n_mfcc: 39 # 39 for MFCC energies
 window_size: 0.025 #25 milliseconds
 window_step: 0.010 #10 ms
 num_phones: 39 #39 phone labels
-hidden_dim: 512
-num_layers: 4
+
+rnn: 'GRU'
+hidden_dim: 384
+num_layers: 5
 grad_clip: 3
-weighted_loss: True
+weighted_loss: False
 std_multiplier: 5
 bidirectional: True
 cuda: True #whether to use NVIDIA cuda
-decode_type: 'max' #max or CTC
 
+decode_type: 'max' #max or CTC
+gen_template: False
+infer_mode: 'indi' # group or indi
 h_spike: 0.2 #minimum node probability to be considered in lattice
 prob_thesh_const: 10 #replace 0 in substitution matrix with min/this value

@@ -5,8 +5,7 @@ Converts raw TIMIT data into a pickle dump which can be used during training
 import numpy as np
 import pickle
 import os
-import scipy.io.wavfile as wav
-from python_speech_features import fbank
+import utils
 import json
 
 
@@ -34,10 +33,7 @@ class timit_data():
         self.db_path = config_file['dir']['dataset']
 
         # fold phones in list to the phone which is the key e.g. 'ao' is 'collapsed' into 'aa'
-        self.replacement = {'aa': ['ao'], 'ah': ['ax', 'ax-h'], 'er': ['axr'], 'hh': ['hv'], 'ih': ['ix'],
-                            'l': ['el'], 'm': ['em'], 'n': ['en', 'nx'], 'ng': ['eng'], 'sh': ['zh'],
-                            'pau': ['pcl', 'tcl', 'kcl', 'bcl', 'dcl', 'gcl', 'h#', 'epi', 'q'],
-                            'uw': ['ux']}
+        self.replacement = utils.replacement_dict()
 
         self.pkl_name = self.db_path + self.mode + '_lstm_ctc' + '.pkl'
 
@@ -76,12 +72,11 @@ class timit_data():
                         continue
 
                     wav_path = os.path.join(base_pth, dialect, speaker_id, wav_file)
-                    (rate, sig) = wav.read(wav_path)
-                    # sig ranges from -32768 to +32768 AND NOT -1 to +1
-                    feat, energy = fbank(sig, samplerate=rate, winlen=self.win_len, winstep=self.win_step,
-                                         nfilt=self.config['feat_dim'], winfunc=np.hamming)
 
-                    feat_log_full = np.log(feat)  # calculate log mel filterbank energies for complete file
+                    final_vec = utils.read_wav(wav_path, winlen=self.config['window_size'],
+                                               winstep=self.config['window_step'],
+                                               fbank_filt=self.config['n_fbank'], mfcc_filt=self.config['n_mfcc'])
+
                     phenome_path = wav_path[:-3] + 'PHN'  # file which contains the phenome location data
                     # phones in current wav file
                     cur_phones = []
@@ -107,7 +102,7 @@ class timit_data():
                         cur_phones.append(ph)
 
                     # Append current recording to the main list
-                    list_features.append(feat_log_full)
+                    list_features.append(final_vec)
                     list_phones.append(cur_phones)
 
         # Each item in to_return is a list corresponding to a single recording

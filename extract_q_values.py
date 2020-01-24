@@ -1,6 +1,5 @@
 import numpy as np
-import scipy.io.wavfile as wav
-from python_speech_features import fbank
+import utils
 import torch
 import os
 import json
@@ -13,11 +12,7 @@ from hypo_search import generate_lattice, traverse_best_lattice, find_q_values
 np.random.seed(7)
 
 # fold phones in list to the phone which is the key e.g. 'ao' is 'collapsed' into 'aa'
-replacement = {'aa': ['ao'], 'ah': ['ax', 'ax-h'], 'er': ['axr'], 'hh': ['hv'], 'ih': ['ix'],
-               'l': ['el'], 'm': ['em'], 'n': ['en', 'nx'], 'ng': ['eng'], 'sh': ['zh'],
-               'pau': ['pcl', 'tcl', 'kcl', 'bcl', 'dcl', 'gcl', 'h#', 'epi', 'q'],
-               'uw': ['ux']}
-
+replacement = utils.replacement_dict()
 
 # Ignore DS_Store files found on Mac
 def listdir(pth):
@@ -143,13 +138,9 @@ class QValGenModel:
                 # increment count of phone
                 ph_count_dict[ph] += 1
 
-            (rate, sig) = wav.read(wav_path)
-            # sig ranges from -32768 to +32768 AND NOT -1 to +1
-            feat, energy = fbank(sig, samplerate=rate, winlen=self.win_len, winstep=self.win_step,
-                                 nfilt=self.config['feat_dim'], winfunc=np.hamming)
-
-            feat_log_full = np.log(feat)  # calculate log mel filterbank energies for complete file
-            to_return.append((feat_log_full, cur_phones))
+            final_vec = utils.read_wav(wav_path, winlen=self.config['window_size'], winstep=self.config['window_step'],
+                                       fbank_filt=self.config['n_fbank'], mfcc_filt=self.config['n_mfcc'])
+            to_return.append((final_vec, cur_phones))
 
         print("Final phone count dict:", ph_count_dict)
         with open(self.pkl_name, 'wb') as f:
@@ -181,7 +172,7 @@ class QValGenModel:
         print("Max length:", max_l, max_label_len, "; Ignored", (len(lengths) - len(sent_lens)) / len(lengths),
               "fraction of examples")
 
-        feature_dim = self.config['feat_dim']
+        feature_dim = self.config['n_mfcc'] + self.config['n_fbank']
         pad_id = len(self.phone_to_id) - 1
 
         for sentence in list_of_sent:
@@ -282,7 +273,7 @@ class QValGenModel:
         return final_outs, self.phone_to_id
 
 
-def find_batch_q(dump_path, min_phones, dec_type, top_n, exp_factor=1):
+def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor=1):
     """
     Computes the q-vale for each phone averaged over a specified number of instances
     :param dump_path: path to dump file
@@ -312,7 +303,7 @@ def find_batch_q(dump_path, min_phones, dec_type, top_n, exp_factor=1):
     db, phone_to_id = a.get_outputs()
 
     # load probabilities vectors
-    with open(config['dir']['pickle'] + 'probs.pkl', 'rb') as f:
+    with open(prob_path, 'rb') as f:
         insert_prob, delete_prob, replace_prob = pickle.load(f)
         div = config['prob_thesh_const']
 
@@ -368,4 +359,4 @@ def find_batch_q(dump_path, min_phones, dec_type, top_n, exp_factor=1):
 
 
 if __name__ == '__main__':
-    find_batch_q('pickle/final_q_vals.pkl', dec_type='max', min_phones=75, top_n=5)
+    find_batch_q('pickle/final_q_vals.pkl', 'probs.pkl', dec_type='max', min_phones=75, top_n=5)

@@ -9,12 +9,10 @@ import numpy as np
 import os
 import datetime
 from copy import deepcopy
-from model import RNN as Model
 import pickle
 from read_yaml import read_yaml
 from dataloader import timit_loader
-import scipy.io.wavfile as wav
-from python_speech_features import fbank
+import utils
 from beam_search import decode
 
 
@@ -23,59 +21,68 @@ class dl_model():
     def __init__(self, mode):
 
         # Read config fielewhich contains parameters
-        self.config_file = read_yaml()
+        self.config = read_yaml()
         self.mode = mode
 
+        if self.config['rnn'] == 'liGRU':
+            from model import liGRU as Model
+        elif self.config['rnn'] == 'GRU' or self.config['rnn'] == 'LSTM':
+            from model import RNN as Model
+        else:
+            print("Model import failed")
+            exit(0)
         # Architecture name decides prefix for storing models and plots
 
-        arch_name = '_'.join(
-            [self.config_file['rnn'], str(self.config_file['num_layers']), str(self.config_file['hidden_dim'])])
+        self.arch_name = '_'.join(
+            [self.config['rnn'], str(self.config['num_layers']), str(self.config['hidden_dim'])])
 
-        print("Architecture:", arch_name)
+        print("Architecture:", self.arch_name)
         # Change paths for storing models
-        self.config_file['dir']['models'] = self.config_file['dir']['models'].split('/')[0] + '_' + arch_name + '/'
-        self.config_file['dir']['plots'] = self.config_file['dir']['plots'].split('/')[0] + '_' + arch_name + '/'
+        self.config['dir']['models'] = self.config['dir']['models'].split('/')[0] + '_' + self.arch_name + '/'
+        self.config['dir']['plots'] = self.config['dir']['plots'].split('/')[0] + '_' + self.arch_name + '/'
 
         # Make folders if DNE
-        if not os.path.exists(self.config_file['dir']['models']):
-            os.mkdir(self.config_file['dir']['models'])
-        if not os.path.exists(self.config_file['dir']['plots']):
-            os.mkdir(self.config_file['dir']['plots'])
-        if not os.path.exists(self.config_file['dir']['pickle']):
-            os.mkdir(self.config_file['dir']['pickle'])
+        if not os.path.exists(self.config['dir']['models']):
+            os.mkdir(self.config['dir']['models'])
+        if not os.path.exists(self.config['dir']['plots']):
+            os.mkdir(self.config['dir']['plots'])
+        if not os.path.exists(self.config['dir']['pickle']):
+            os.mkdir(self.config['dir']['pickle'])
 
-        self.cuda = (self.config_file['cuda'] and torch.cuda.is_available())
+        self.cuda = (self.config['cuda'] and torch.cuda.is_available())
 
         # load/initialise metrics to be stored and load model
         if mode == 'train' or mode == 'test':
 
-            self.plots_dir = self.config_file['dir']['plots']
+            self.plots_dir = self.config['dir']['plots']
             # store hyperparameters
-            self.total_epochs = self.config_file['train']['epochs']
-            self.test_every = self.config_file['train']['test_every_epoch']
-            self.test_per = self.config_file['train']['test_per_epoch']
-            self.print_per = self.config_file['train']['print_per_epoch']
-            self.save_every = self.config_file['train']['save_every']
-            self.plot_every = self.config_file['train']['plot_every']
+            self.total_epochs = self.config['train']['epochs']
+            self.test_every = self.config['train']['test_every_epoch']
+            self.test_per = self.config['train']['test_per_epoch']
+            self.print_per = self.config['train']['print_per_epoch']
+            self.save_every = self.config['train']['save_every']
+            self.plot_every = self.config['train']['plot_every']
+
+            # declare model
+            self.model = Model(self.config, mode)
+
             # dataloader which returns batches of data
-            self.train_loader = timit_loader('train', self.config_file)
-            self.test_loader = timit_loader('test', self.config_file)
+            self.train_loader = timit_loader('train', self.config)
+            self.test_loader = timit_loader('test', self.config)
 
             self.start_epoch = 1
             self.edit_dist = []
             self.train_losses, self.test_losses = [], []
-            # declare model
-            self.model = Model(self.config_file, weights=self.train_loader.weights)
 
         else:
 
-            self.model = Model(self.config_file, weights=None)
+            self.model = Model(self.config, mode)
 
         if self.cuda:
             self.model.cuda()
 
         # resume training from some stored model
-        if self.mode == 'train' and self.config_file['train']['resume']:
+        if self.mode == 'train' and self.config['train']['resume']:
             self.start_epoch, self.train_losses, self.test_losses, self.edit_dist = self.model.load_model(mode,
                                                                                                           self.model.rnn_name,
                                                                                                           self.model.num_layers,
@@ -84,13 +91,10 @@ class dl_model():
 
         # load best model for testing/feature extraction
         elif self.mode == 'test' or mode == 'test_one':
-            self.model.load_model(mode, self.config_file['rnn'], self.model.num_layers, self.model.hidden_dim)
+            self.model.load_model(mode, self.config['rnn'], self.model.num_layers, self.model.hidden_dim)
 
         # Replacement phones
-        self.replacement = {'aa': ['ao'], 'ah': ['ax', 'ax-h'], 'er': ['axr'], 'hh': ['hv'], 'ih': ['ix'],
-                            'l': ['el'], 'm': ['em'], 'n': ['en', 'nx'], 'ng': ['eng'], 'sh': ['zh'],
-                            'pau': ['pcl', 'tcl', 'kcl', 'bcl', 'dcl', 'gcl', 'h#', 'epi', 'q'],
-                            'uw': ['ux']}
+        self.replacement = utils.replacement_dict()
 
     # Train the model
     def train(self):
@@ -138,7 +142,7 @@ class dl_model():
                 loss.backward()
 
                 # clip gradient
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config_file['grad_clip'])
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['grad_clip'])
                 self.model.optimizer.step()
 
                 # store loss
@@ -166,6 +170,11 @@ class dl_model():
 
             # test every 5 epochs in the beginning and then every fixed no of epochs specified in config file
             # useful to see how loss stabilises in the beginning
+            # save model
+            if epoch % self.save_every == 0:
+                self.model.save_model(False, epoch, self.train_losses, self.test_losses, self.edit_dist,
+                                      self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
+
             if epoch % 5 == 0 and epoch < self.test_every:
                 self.test(epoch)
                 self.model.train()
@@ -176,11 +185,6 @@ class dl_model():
             if epoch % self.plot_every == 0:
                 self.plot_loss_acc(epoch)
 
-            # save model
-            if epoch % self.save_every == 0:
-                self.model.save_model(False, epoch, self.train_losses, self.test_losses, self.edit_dist,
-                                      self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
-
     # test model
     def test(self, epoch=None):
 
@@ -190,7 +194,7 @@ class dl_model():
         # number of sequences
         total_seq = 0
         # decode type
-        decode_type = self.config_file['decode_type']
+        decode_type = self.config['decode_type']
         # operations dictionary for calculating probabilities
         num_ph = self.model.num_phones
         op_dict = {}
@@ -241,7 +245,7 @@ class dl_model():
                         argmaxed = np.argmax(outputs, axis=2)
                         seq = list(argmaxed[i][:input_lens[i]])
                         # collapse neighbouring and remove blank token
-                        ctc_out = ctc_collapse(seq, self.model.blank_token_id)
+                        ctc_out = utils.ctc_collapse(seq, self.model.blank_token_id)
                     else:
                         # predict by CTC
                         ctc_out = decode(outputs[i][:input_lens[i], :], 1, self.model.blank_token_id)[0][0]
@@ -276,7 +280,7 @@ class dl_model():
         test_loss /= len(self.test_loader)
         edit_dist_batch /= total_seq
 
-        print("Edit distance - %.4f %% , Loss: %.7f" % (edit_dist_batch*100, test_loss))
+        print("Edit distance - %.4f %% , Loss: %.7f" % (edit_dist_batch * 100, test_loss))
 
         # Store in lists for keeping track of model performance
         self.edit_dist.append((edit_dist_batch, epoch))
@@ -296,11 +300,12 @@ class dl_model():
                 prob_del[ph] = data['deletions'] / data['total']
                 prob_substi[ph] = data['substitutions'] / data['total']
 
-            # Dump
-            prob_dump_path = self.config_file['dir']['pickle'] + 'probs_new.pkl'
-            with open(prob_dump_path, 'wb') as f:
-                pickle.dump((prob_insert, prob_del, prob_substi), f)
-                print("Dumped probabilities")
+            if self.mode == 'train':
+                # Dump probabilities
+                prob_dump_path = self.config['dir']['pickle'] + self.arch_name + '_probs_'+ str(epoch) + '.pkl'
+                with open(prob_dump_path, 'wb') as f:
+                    pickle.dump((prob_insert, prob_del, prob_substi), f)
+                    print("Dumped probabilities")
 
         return edit_dist_batch
 
@@ -308,50 +313,40 @@ class dl_model():
         """
         Called during feature extraction
         :param file_paths: list of file paths to input .wav file to be tested
-        :return: predicted phone probabilities after after softmax layer
+        :return: predicted phone probabilities after softmax layer
         """
-        features, features_arr, lens = [], [], []
+        features, lens = [], []
         for file_path in file_paths:
             # read .wav file
-            (rate, sig) = wav.read(file_path)
-            assert rate == 16000
-            # sig ranges from -32768 to +32768 AND NOT -1 to +1
-            feat, energy = fbank(sig, samplerate=rate, winlen=self.config_file['window_size'],
-                                 winstep=self.config_file['window_step'],
-                                 nfilt=self.config_file['feat_dim'], winfunc=np.hamming)
-            feat = np.log(feat)
+            feat = utils.read_wav(file_path, winlen=self.config['window_size'], winstep=self.config['window_step'],
+                                  fbank_filt=self.config['n_fbank'], mfcc_filt=self.config['n_mfcc'])
             tsteps, hidden_dim = feat.shape
             # calculate log mel filterbank energies for complete file and reshape so that it can be passed through model
-            features.append(feat)
+            features.append((feat, file_path))
             lens.append(tsteps)
 
-        max_len = max([x.shape[0] for x in features])
-        for feat in features:
-            padding_l = max_len - feat.shape[0]
-            padded = np.append(feat, np.zeros((padding_l, feat.shape[1])), axis=0)
-            features_arr.append(padded)
-
-        inputs, lens = torch.from_numpy(np.array(features_arr)).float(), torch.from_numpy(np.array(lens)).long()
+        final = []
 
         self.model.eval()
 
         with torch.no_grad():
-            if self.cuda:
-                inputs = inputs.cuda()
-                lens = lens.cuda()
+            for i, (feat, path) in enumerate(features):
+                input_model = torch.from_numpy(np.array(feat)).float()[None, :, :]
+                cur_len = torch.from_numpy(np.array(lens[i:i+1])).long()
 
-            # Pass through model
-            outputs = self.model(inputs, lens).cpu()
-            # Apply softmax
-            softmax = torch.nn.functional.softmax(outputs, dim=2).numpy()
+                if self.cuda:
+                    input_model = input_model.cuda()
+                    cur_len = cur_len.cuda()
+
+                # Pass through model
+                output = self.model(input_model, cur_len).cpu().numpy()
+                # Apply softmax
+                # softmax = torch.nn.functional.softmax(output, dim=2).numpy()
+                final.append((output, path))
 
         id_to_phone = {v[0]: k for k, v in self.model.phone_to_id.items()}
 
-        final_res = []
-        for i in range(softmax.shape[0]):
-            final_res.append(softmax[i][:lens[i]])
-
-        return final_res, self.model.phone_to_id, id_to_phone
+        return final, self.model.phone_to_id, id_to_phone
 
     # Test for each wav file in the folder and also compares with ground truth if .PHN file exists
     def test_folder(self, test_folder):
@@ -366,13 +361,9 @@ class dl_model():
             if wav_file == '.DS_Store' or wav_file.split('.')[-1] != 'wav':  # or os.path.exists(dump_path):
                 continue
 
-            (rate, sig) = wav.read(wav_path)
-            assert rate == 16000
-            # sig ranges from -32768 to +32768 AND NOT -1 to +1
-            feat, energy = fbank(sig, samplerate=rate, winlen=self.config_file['window_size'],
-                                 winstep=self.config_file['window_step'],
-                                 nfilt=self.config_file['feat_dim'], winfunc=np.hamming)
-            feat = np.log(feat)
+            feat = utils.read_wav(wav_path, winlen=self.config['window_size'], winstep=self.config['window_step'],
+                                  fbank_filt=self.config['n_fbank'], mfcc_filt=self.config['n_mfcc'])
+
             tsteps, hidden_dim = feat.shape
             # calculate log mel filterbank energies for complete file
             feat_log_full = np.reshape(feat, (1, tsteps, hidden_dim))
@@ -397,7 +388,7 @@ class dl_model():
                 # Take argmax to generate final string
                 argmaxed = np.argmax(outputs, axis=1)
                 # collapse according to CTC ruls
-                final_str = ctc_collapse(argmaxed, self.model.blank_token_id)
+                final_str = utils.ctc_collapse(argmaxed, self.model.blank_token_id)
                 ans = [id_to_phone[a] for a in final_str]
                 # Generate dumpable format of phone, start time and end time
                 print("Predicted:", ans)
@@ -451,56 +442,6 @@ class dl_model():
         plt.savefig(filename)
 
         print("Saved plots")
-
-
-def compress_seq(data):
-    """
-    Compresses a sequence (a,a,b,b,b,b,c,d,d....) into [(a,0,1),(b,2,5),...] i.e. [(phone, start_id, end_index]
-    :param data: list of elements
-    :return: data in the above format
-    """
-
-    final = []
-    current_ph, current_start_idx = data[0], 0
-
-    for i in range(2, len(data)):
-        now_ph = data[i]
-        if now_ph == current_ph:
-            # same so continue
-            continue
-        else:
-            # different element so append current and move on to the next
-            final.append((current_ph, current_start_idx, i - 1))
-            current_start_idx = i
-            current_ph = now_ph
-    # final element yet to be appended
-    final.append((current_ph, current_start_idx, len(data) - 1))
-    return final
-
-
-def ctc_collapse(data, blank_id):
-    """
-    Collapse consecutive frames and then remove blank tokens
-    :param data: list of elements e.g. [1,1,2,3,2,0,2,0]
-    :param blank_id: blank token id
-    :return: [1,2,3,2,2] in the above case
-    """
-    final = []
-    current_ph = data[0]
-
-    for i in range(2, len(data)):
-        now_ph = data[i]
-        if now_ph == current_ph:
-            continue
-        else:
-            final.append(current_ph)
-            current_ph = now_ph
-
-    # Append final element
-    final.append(current_ph)
-    # weed out the blank tokens
-    final = [x for x in final if x != blank_id]
-    return final
 
 
 def edit_distance(s1, s2):
@@ -576,37 +517,11 @@ def read_phones(phone_file_path, replacement):
     return labels
 
 
-def frame_to_sample(frame_no, rate=16000, hop=10, window=25):
-    if frame_no == 0:
-        return 0
-    multiplier = rate // 1000
-    return multiplier * window + (frame_no - 1) * hop * multiplier
-
-
-def sample_to_frame(num, is_start, rate=16000, window=25, hop=10):
-    multi = rate // 1000
-    if num < window * multi:
-        return 0
-    else:
-        base_frame = (num - multi * window) // (multi * hop) + 1
-        base_sample = frame_to_sample(base_frame)
-        if is_start:
-            if num - base_sample <= multi * hop // 2:
-                return base_frame
-            else:
-                return base_frame + 1
-        else:
-            if num - base_sample <= multi * hop // 2:
-                return base_frame - 1
-            else:
-                return base_frame
-
-
 if __name__ == '__main__':
-    # a = dl_model('train')
-    # a.train()
-    a = dl_model('test')
-    a.test()
+    a = dl_model('train')
+    a.train()
+    # a = dl_model('test')
+    # a.test()
     # a = dl_model('test_one')
     # a.test_one(['trial/SX36.wav', 'trial/SX233.wav'])
     # a.test_folder('trial/')

@@ -65,7 +65,7 @@ class timit_loader():
         print("Max length:", max_l, max_label_len, "; Ignored", (len(lengths) - len(sent_lens)) / len(lengths),
               "fraction of examples")
 
-        feature_dim = self.config['feat_dim']
+        feature_dim = self.config['n_mfcc'] + self.config['n_fbank']
         pad_id = len(self.phone_to_id) - 1
 
         for sentence in list_of_sent:

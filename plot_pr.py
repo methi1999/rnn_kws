@@ -35,14 +35,15 @@ if plot_fscore:
 
 else:
 	# AUC-ROC values
-	final_results = pickle.load(open('pickle/final_res_8' + '.pkl', 'rb'))
-	cvals = list(np.arange(0, 5, 0.1))
+	final_results = pickle.load(open('pickle/final_res_20' + '.pkl', 'rb'))
+	cvals = list(np.arange(0, 5, 0.005))
 	prec_recall_dat = {}
 
 	for c in cvals:
 	    prec_recall_dat[c] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
 	    for word, res in final_results.items():
 	        for iteration, d in res.items():
+	            d = d['data']
 	            if d[0][2] == 'right':
 	                found = False
 	                for gr, pred, _ in d:
