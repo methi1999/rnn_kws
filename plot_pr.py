@@ -7,11 +7,11 @@ import json
 import pickle
 import numpy as np
 
-plot_fscore = False
+plot_fscore = True
 
 if plot_fscore:
-	filename = '8'
-	data = json.load(open('pickle/pr_' + filename + '.json', 'r'))
+	filename = 'full'
+	data = json.load(open('pr_' + filename + '.json', 'r'))
 	print(data)
 
 	prec = [x['prec-recall'][0] for x in data.values()]

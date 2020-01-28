@@ -35,7 +35,8 @@ class timit_data():
         # fold phones in list to the phone which is the key e.g. 'ao' is 'collapsed' into 'aa'
         self.replacement = utils.replacement_dict()
 
-        self.pkl_name = self.db_path + self.mode + '_lstm_ctc' + '.pkl'
+        feature_dim = self.config['n_fbank'] + self.config['n_mfcc']
+        self.pkl_name = self.db_path + self.mode + '_rnn_ctc_' + str(feature_dim) + '.pkl'
 
         self.win_len, self.win_step = config_file['window_size'], config_file['window_step']
 

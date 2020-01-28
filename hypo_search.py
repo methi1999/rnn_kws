@@ -226,7 +226,7 @@ def traverse_best_lattice(lattices, decode_type, target_string, insert_prob, del
     elif decode_type == 'max':
 
         prev_best = -np.inf
-        best_subsequence = []
+        best_subsequence = ()
         best_lat = 0
 
         for which_lat, lattice in enumerate(lattices):
@@ -236,6 +236,7 @@ def traverse_best_lattice(lattices, decode_type, target_string, insert_prob, del
 
             for i in range(m):
                 cur_string = [x[0] for x in lattice[i:]]
+                cur_prob = [x[1] for x in lattice[i:]]
                 edit_matrix = edit_distance(target_string, cur_string, insert_prob, del_prob, replace_prob)
                 prob = 0
                 for j in range(i, m):
@@ -250,7 +251,7 @@ def traverse_best_lattice(lattices, decode_type, target_string, insert_prob, del
                             print("Found best in", str(which_lat+1), "lattice")
                         best_lat = which_lat
                         prev_best = final_score
-                        best_subsequence = cur_string[:j - i + 1]
+                        best_subsequence = (cur_string[:j - i + 1], cur_prob[:j - i + 1])
 
         return best_subsequence, lattices[best_lat]
 
@@ -339,11 +340,11 @@ def find_q_values(s1, s2, s2_node_prob, prob_ins, prob_del, prob_replacement):
             final_dict[ph_id] = []
         final_dict[ph_id].append(inv_func(prob_substi + node_prob))
 
-    # for insertion in op_dict['insertions']:
-    #     ph_id, prob, node_prob = insertion[1], insertion[2], insertion[3]
-    #     if not ph_id in final_dict.keys():
-    #         final_dict[ph_id] = []
-    #     final_dict[ph_id].append(inv_func(prob + node_prob))
+    for insertion in op_dict['insertions']:
+        ph_id, prob, node_prob = insertion[1], insertion[2], insertion[3]
+        if not ph_id in final_dict.keys():
+            final_dict[ph_id] = []
+        final_dict[ph_id].append(inv_func(prob + node_prob))
 
     # print(final_dict)
     return final_dict
@@ -371,21 +372,21 @@ def read_grtruth(filepath):
 
 
 if __name__ == '__main__':
-    insert_prob, delete_prob, replace_prob = pickle.load(open('pickle/probs.pkl', 'rb'))
+    insert_prob, delete_prob, replace_prob = pickle.load(open('pickle/GRU_5_384_probs.pkl', 'rb'))
     a = dl_model('test_one')
-    outputs, phone_to_id, id_to_phone = a.test_one(['trial/SI912.wav'])
-    outputs = outputs[0]
+    outputs, phone_to_id, id_to_phone = a.test_one(['../datasets/TIMIT/TRAIN/DR7/MJJM0/SI1251.wav'])
+    outputs = outputs[0][0][0]
+    outputs = np.exp(outputs)/np.sum(np.exp(outputs), axis=1)[:,None]
 
     final_lattice = generate_lattice(outputs, a.model.blank_token_id, 'max', 3, print_final_lattice=True)
 
-    gr_phones = read_grtruth('trial/SI912.PHN')
+    gr_phones = read_grtruth('../datasets/TIMIT/TRAIN/DR7/MJJM0/SI1251.PHN')
     gr_phone_ids = np.array([phone_to_id[x][0] for x in gr_phones])
 
-    res = traverse_best_lattice(final_lattice, 'max', gr_phone_ids, insert_prob, delete_prob, replace_prob)
-    res_phones = [id_to_phone[x] for x in res]
+    res, best_lat = traverse_best_lattice(final_lattice, 'max', gr_phone_ids, insert_prob, delete_prob, replace_prob)
+    res_phones = [id_to_phone[x] for x in res[0]]
     print('Ground truth:', gr_phones, '\n', 'Predicted:', res_phones)
-    exit(0)
-    print(find_q_values(gr_phone_ids, res, [x[0][1] for x in final_lattice], insert_prob, delete_prob, replace_prob))
+    print(find_q_values(gr_phone_ids, res[0], res[1], insert_prob, delete_prob, replace_prob))
     # print(final_lattice, ([len(x) for x in final_lattice if len(x) != 1]))
 
     # phones = [[mapping[x[0]] for x in l] for l in final_lattice]

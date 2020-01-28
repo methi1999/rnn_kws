@@ -32,9 +32,9 @@ class dl_model():
             print("Model import failed")
             exit(0)
         # Architecture name decides prefix for storing models and plots
-
+        feature_dim = self.config['n_fbank'] + self.config['n_mfcc']
         self.arch_name = '_'.join(
-            [self.config['rnn'], str(self.config['num_layers']), str(self.config['hidden_dim'])])
+            [self.config['rnn'], str(self.config['num_layers']), str(self.config['hidden_dim']), str(feature_dim)])
 
         print("Architecture:", self.arch_name)
         # Change paths for storing models
@@ -64,11 +64,11 @@ class dl_model():
             self.plot_every = self.config['train']['plot_every']
 
             # declare model
-            self.model = Model(self.config, mode)
 
             # dataloader which returns batches of data
             self.train_loader = timit_loader('train', self.config)
             self.test_loader = timit_loader('test', self.config)
+            self.model = Model(self.config, mode)
 
             self.start_epoch = 1
             self.edit_dist = []
@@ -256,7 +256,7 @@ class dl_model():
                     # calculated edit distance and required operations
                     dist, opr = edit_distance(gr_truth, ctc_out)
 
-                    # increment number of examples
+                    # increment number of phones
                     total_seq += len(gr_truth)
 
                     # update number of operations
@@ -289,23 +289,24 @@ class dl_model():
         # if testing loss is minimum, store it as the 'best.pth' model, which is used for feature extraction
         # store only when doing train/test together i.e. mode is train
         # dump probabilities
+        prob_insert, prob_del, prob_substi = np.zeros(num_ph), np.zeros(num_ph), np.zeros((num_ph, num_ph))
+
         if test_loss == min([x[0] for x in self.test_losses]) and self.mode == 'train':
             print("Best new model found!")
             self.model.save_model(True, epoch, self.train_losses, self.test_losses, self.edit_dist,
                                   self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
             # Calculate the probabilities of insertion, deletion and substitution
-            prob_insert, prob_del, prob_substi = np.zeros(num_ph), np.zeros(num_ph), np.zeros((num_ph, num_ph))
             for ph, data in op_dict.items():
                 prob_insert[ph] = data['insertions'] / data['total']
                 prob_del[ph] = data['deletions'] / data['total']
                 prob_substi[ph] = data['substitutions'] / data['total']
 
-            if self.mode == 'train':
-                # Dump probabilities
-                prob_dump_path = self.config['dir']['pickle'] + self.arch_name + '_probs_'+ str(epoch) + '.pkl'
-                with open(prob_dump_path, 'wb') as f:
-                    pickle.dump((prob_insert, prob_del, prob_substi), f)
-                    print("Dumped probabilities")
+        if self.mode == 'train':
+            # Dump probabilities
+            prob_dump_path = self.config['dir']['pickle'] + self.arch_name + '_probs_'+ str(epoch) + '.pkl'
+            with open(prob_dump_path, 'wb') as f:
+                pickle.dump((prob_insert, prob_del, prob_substi), f)
+                print("Dumped probabilities")
 
         return edit_dist_batch
 

@@ -38,6 +38,7 @@ def read_wav(file_path, winlen, winstep, fbank_filt, mfcc_filt):
     mfcc_delta_delta = np.concatenate((mfcc_delta[0:1, :], mfcc_delta[1:, :] - mfcc_delta[:-1, :]))
 
     features = np.concatenate((fbank_feat, mfcc_feat, mfcc_delta, mfcc_delta_delta), axis=1)
+    # features = np.concatenate((mfcc_feat, mfcc_delta, mfcc_delta_delta), axis=1)
 
     return features
 

@@ -273,7 +273,7 @@ class QValGenModel:
         return final_outs, self.phone_to_id
 
 
-def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor=1):
+def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor):
     """
     Computes the q-vale for each phone averaged over a specified number of instances
     :param dump_path: path to dump file
@@ -337,10 +337,10 @@ def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor=1
         # Generate lattice from current predictions
         lattices = generate_lattice(cur_out, a.rnn.model.blank_token_id, dec_type, top_n)
         # Find best subsequence in lattice
-        res, final_lattice = traverse_best_lattice(lattices, dec_type, gr_phone_ids, insert_prob, delete_prob,
-                                                   replace_prob)
+        res_substring, final_lattice = traverse_best_lattice(lattices, dec_type, gr_phone_ids,
+                                                             insert_prob, delete_prob, replace_prob)
         # Calculate q values by comparing template and best match
-        q_vals = find_q_values(gr_phone_ids, res, [x[1] for x in final_lattice],
+        q_vals = find_q_values(gr_phone_ids, res_substring[0], res_substring[1],
                                insert_prob, delete_prob, replace_prob)
 
         # Add them up
