@@ -33,12 +33,13 @@ def read_wav(file_path, winlen, winstep, fbank_filt, mfcc_filt):
     # ***************Remove this********************
     fbank_feat = np.log(fbank_feat)
     # mfcc features
-    mfcc_feat = mfcc(sig, samplerate=rate, winlen=winlen, winstep=winstep, numcep=mfcc_filt // 3, winfunc=np.hamming)
-    mfcc_delta = np.concatenate((mfcc_feat[0:1, :], mfcc_feat[1:, :] - mfcc_feat[:-1, :]))
-    mfcc_delta_delta = np.concatenate((mfcc_delta[0:1, :], mfcc_delta[1:, :] - mfcc_delta[:-1, :]))
-
-    features = np.concatenate((fbank_feat, mfcc_feat, mfcc_delta, mfcc_delta_delta), axis=1)
+    # mfcc_feat = mfcc(sig, samplerate=rate, winlen=winlen, winstep=winstep, numcep=mfcc_filt // 3, winfunc=np.hamming)
+    # mfcc_delta = np.concatenate((mfcc_feat[0:1, :], mfcc_feat[1:, :] - mfcc_feat[:-1, :]))
+    # mfcc_delta_delta = np.concatenate((mfcc_delta[0:1, :], mfcc_delta[1:, :] - mfcc_delta[:-1, :]))
+    #
+    # features = np.concatenate((fbank_feat, mfcc_feat, mfcc_delta, mfcc_delta_delta), axis=1)
     # features = np.concatenate((mfcc_feat, mfcc_delta, mfcc_delta_delta), axis=1)
+    features = fbank_feat
 
     return features
 

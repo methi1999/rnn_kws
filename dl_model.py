@@ -28,6 +28,10 @@ class dl_model():
             from model import liGRU as Model
         elif self.config['rnn'] == 'GRU' or self.config['rnn'] == 'LSTM':
             from model import RNN as Model
+        elif self.config['rnn'] == 'TCN':
+            from model import TCN as Model
+        elif self.config['rnn'] == 'BTCN':
+            from model import bidirectional_TCN as Model
         else:
             print("Model import failed")
             exit(0)
@@ -142,7 +146,7 @@ class dl_model():
                 loss.backward()
 
                 # clip gradient
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['grad_clip'])
+                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['grad_clip'])
                 self.model.optimizer.step()
 
                 # store loss
@@ -152,7 +156,7 @@ class dl_model():
                 if i in print_range:
                     try:
                         print('After %i batches, Current Loss = %.7f, Avg. Loss = %.7f' % (
-                            i + 1, epoch_loss / (i + 1), np.mean(np.array([x[0] for x in self.train_losses]))))
+                            i, epoch_loss / i, np.mean(np.array([x[0] for x in self.train_losses]))))
                     except:
                         pass
 
@@ -207,6 +211,7 @@ class dl_model():
         test_loss = 0
 
         k = 0
+        # to_dump_probs, to_dump_labels = [], []
 
         with torch.no_grad():
 
@@ -227,6 +232,7 @@ class dl_model():
 
                 # zero the parameter gradients
                 self.model.optimizer.zero_grad()
+
                 # forward + backward + optimize
                 outputs = self.model(inputs, input_lens)
                 loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
@@ -250,8 +256,12 @@ class dl_model():
                         # predict by CTC
                         ctc_out = decode(outputs[i][:input_lens[i], :], 1, self.model.blank_token_id)[0][0]
 
+                    # print(ctc_out)
                     # ground truth
                     gr_truth = list(labels[i][:label_lens[i]])
+
+                    # to_dump_probs.append(outputs[i][:input_lens[i], :])
+                    # to_dump_labels.append(labels[i][:label_lens[i]])
 
                     # calculated edit distance and required operations
                     dist, opr = edit_distance(gr_truth, ctc_out)
@@ -308,6 +318,9 @@ class dl_model():
                 pickle.dump((prob_insert, prob_del, prob_substi), f)
                 print("Dumped probabilities")
 
+        # with open('test_res.pkl', 'wb') as f:
+        #     pickle.dump((to_dump_probs, to_dump_labels), f)
+
         return edit_dist_batch
 
     def test_one(self, file_paths):
@@ -342,7 +355,7 @@ class dl_model():
                 # Pass through model
                 output = self.model(input_model, cur_len).cpu().numpy()
                 # Apply softmax
-                # softmax = torch.nn.functional.softmax(output, dim=2).numpy()
+                # output = np.exp(output) / np.sum(np.exp(output), axis=1)[:, None]
                 final.append((output, path))
 
         id_to_phone = {v[0]: k for k, v in self.model.phone_to_id.items()}
@@ -524,7 +537,16 @@ if __name__ == '__main__':
     # a = dl_model('test')
     # a.test()
     # a = dl_model('test_one')
-    # a.test_one(['trial/SX36.wav', 'trial/SX233.wav'])
+    # output, _, _ = a.test_one(['../datasets/TIMIT/TEST/DR1/FAKS0/SX43.wav', '../datasets/TIMIT/TEST/DR1/FAKS0/SX133.wav',
+    #             '../datasets/TIMIT/TEST/DR1/FDAC1/SX124.wav', '../datasets/TIMIT/TEST/DR1/FELC0/SX126.wav',
+    #             '../datasets/TIMIT/TEST/DR1/FELC0/SX216.wav', '../datasets/TIMIT/TEST/DR1/FJEM0/SX184.wav'])
+
+    # print(output)
+    # for i, _ in output:
+        # print(i.shape)
+        # print(np.argmax(i[0], axis=1))
+    # with open('test_res.pkl', 'wb') as f:
+    #     pickle.dump(output, f)
     # a.test_folder('trial/')
     # a = [1, 1, 2, 3, 4, 4, 5]
     # b = [1, 2, 2, 3, 4, 5]

@@ -6,7 +6,7 @@ dir:
 
 train:
 
-  batch_size: 75
+  batch_size: 100
   
   epochs: 1500 #total no. of epochs to train
   
@@ -20,21 +20,21 @@ train:
  
   loss_func: 'CTC' #loss function 
   optim: 'Adam' #optimiser to speed up training
-  lr: 0.00025 #learning rate
+  lr: 0.001 #learning rate
 
 test:
 
-  batch_size: 100
+  batch_size: 150
 
 
 n_fbank: 40 # 40 for fitlerbank energies
-n_mfcc: 39 # 39 for MFCC energies
+n_mfcc: 0 # 39 for MFCC energies
 window_size: 0.025 #25 milliseconds
 window_step: 0.010 #10 ms
 num_phones: 39 #39 phone labels
 
-rnn: 'GRU'
-hidden_dim: 384
+rnn: 'BTCN'
+hidden_dim: 512 # 384 for best GRU
 num_layers: 5
 grad_clip: 3
 weighted_loss: False

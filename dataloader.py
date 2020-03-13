@@ -31,7 +31,7 @@ class timit_loader():
             fname = config_file['dir']['dataset'] + 'lstm_mapping.json'
             with open(fname, 'r') as f:
                 self.phone_to_id = json.load(f)
-            print("Phones and weights:", self.phone_to_id)
+            # print("Phones and weights:", self.phone_to_id)
 
             self.weights = np.array([x[1] for x in self.phone_to_id.values()])
 

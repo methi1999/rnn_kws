@@ -185,7 +185,7 @@ def generate_lattice(outputs, blank_token_id, decode_type, top_n, collapse_type=
 
 def traverse_best_lattice(lattices, decode_type, target_string, insert_prob, del_prob, replace_prob):
     """
-    Takes top-1 lattice and finds the best subsequence according to edit distance
+    Takes top-n lattice and finds the best subsequence according to edit distance
     :param lattices: [[[phones above threshold and probabilities] after collapsing] list of such possible lattices]
     :param decode_type: CTC or max
     :param target_string: reference string to manipulate
