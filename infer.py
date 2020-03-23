@@ -1,6 +1,7 @@
 import json
 from read_yaml import read_yaml
 import utils
+from utils import listdir
 import torch
 from extract_q_values import find_batch_q
 import scipy.io.wavfile as wav
@@ -271,7 +272,7 @@ class BatchTestModel:
 
         # Load mapping
         try:
-            file_name = config['dir']['dataset'] + 'lstm_mapping.json'
+            file_name = config['dir']['dataset'] + 'phone_mapping.json'
             with open(file_name, 'r') as f:
                 self.phone_to_id = json.load(f)
             self.phone_to_id = {k: v[0] for k, v in self.phone_to_id.items()}  # drop weight distribution

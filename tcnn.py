@@ -22,6 +22,7 @@ class Chomp1d(nn.Module):
 class TemporalBlock(nn.Module):
     def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
         super(TemporalBlock, self).__init__()
+
         self.conv1 = weight_norm(nn.Conv1d(n_inputs, n_outputs, kernel_size,
                                            stride=stride, padding=padding, dilation=dilation))
         self.chomp1 = Chomp1d(padding)
@@ -98,7 +99,7 @@ class TCN(generic_model):
 
         # Load mapping of phone to id
         try:
-            fname = config['dir']['dataset'] + 'lstm_mapping.json'
+            fname = config['dir']['dataset'] + 'phone_mapping.json'
             with open(fname, 'r') as f:
                 self.phone_to_id = json.load(f)
 
@@ -183,7 +184,7 @@ class bidirectional_TCN(generic_model):
 
         # Load mapping of phone to id
         try:
-            fname = config['dir']['dataset'] + 'lstm_mapping.json'
+            fname = config['dir']['dataset'] + 'phone_mapping.json'
             with open(fname, 'r') as f:
                 self.phone_to_id = json.load(f)
 

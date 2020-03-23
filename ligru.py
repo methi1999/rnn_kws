@@ -152,7 +152,7 @@ class liGRU(generic_model):
 
         # Load mapping of phone to id
         try:
-            fname = config['dir']['dataset'] + 'lstm_mapping.json'
+            fname = config['dir']['dataset'] + 'phone_mapping.json'
             with open(fname, 'r') as f:
                 self.phone_to_id = json.load(f)
 

@@ -3,7 +3,6 @@ The main driver file responsible for training, testing and extracting features
 """
 
 import torch
-import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -25,13 +24,13 @@ class dl_model():
         self.mode = mode
 
         if self.config['rnn'] == 'liGRU':
-            from model import liGRU as Model
+            from ligru import liGRU as Model
         elif self.config['rnn'] == 'GRU' or self.config['rnn'] == 'LSTM':
-            from model import RNN as Model
+            from rnn import RNN as Model
         elif self.config['rnn'] == 'TCN':
-            from model import TCN as Model
+            from tcnn import TCN as Model
         elif self.config['rnn'] == 'BTCN':
-            from model import bidirectional_TCN as Model
+            from tcnn import bidirectional_TCN as Model
         else:
             print("Model import failed")
             exit(0)
@@ -345,6 +344,7 @@ class dl_model():
 
         with torch.no_grad():
             for i, (feat, path) in enumerate(features):
+                print(i,'/',len(features))
                 input_model = torch.from_numpy(np.array(feat)).float()[None, :, :]
                 cur_len = torch.from_numpy(np.array(lens[i:i+1])).long()
 
@@ -355,7 +355,7 @@ class dl_model():
                 # Pass through model
                 output = self.model(input_model, cur_len).cpu().numpy()
                 # Apply softmax
-                # output = np.exp(output) / np.sum(np.exp(output), axis=1)[:, None]
+                output = np.exp(output) / np.sum(np.exp(output), axis=1)[:, None]
                 final.append((output, path))
 
         id_to_phone = {v[0]: k for k, v in self.model.phone_to_id.items()}
@@ -532,14 +532,24 @@ def read_phones(phone_file_path, replacement):
 
 
 if __name__ == '__main__':
-    a = dl_model('train')
-    a.train()
+    # a = dl_model('train')
+    # a.train()
     # a = dl_model('test')
     # a.test()
-    # a = dl_model('test_one')
-    # output, _, _ = a.test_one(['../datasets/TIMIT/TEST/DR1/FAKS0/SX43.wav', '../datasets/TIMIT/TEST/DR1/FAKS0/SX133.wav',
-    #             '../datasets/TIMIT/TEST/DR1/FDAC1/SX124.wav', '../datasets/TIMIT/TEST/DR1/FELC0/SX126.wav',
-    #             '../datasets/TIMIT/TEST/DR1/FELC0/SX216.wav', '../datasets/TIMIT/TEST/DR1/FJEM0/SX184.wav'])
+    a = dl_model('test_one')
+    wav_paths = []
+    base_pth = '../datasets/TIMIT/TEST/'
+    for dialect in sorted(utils.listdir(base_pth)):
+        for speaker_id in sorted(utils.listdir(os.path.join(base_pth, dialect))):
+            data = sorted(os.listdir(os.path.join(base_pth, dialect, speaker_id)))
+            wav_files = [x for x in data if x.split('.')[-1] == 'wav']  # all the .wav files
+            for wav_file in wav_files:
+                if wav_file in ['SA1.wav', 'SA2.wav']:
+                    wav_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file))
+
+    outputs, p_to_id, id_to_p = a.test_one(wav_paths)
+    with open('SA_res.pkl', 'wb') as f:
+        pickle.dump((outputs, p_to_id), f)
 
     # print(output)
     # for i, _ in output:

@@ -7,16 +7,13 @@ from read_yaml import read_yaml
 from dl_model import dl_model
 import pickle
 from hypo_search import generate_lattice, traverse_best_lattice, find_q_values
+from utils import listdir
 
 # Set the seed to replicate results
 np.random.seed(7)
 
 # fold phones in list to the phone which is the key e.g. 'ao' is 'collapsed' into 'aa'
 replacement = utils.replacement_dict()
-
-# Ignore DS_Store files found on Mac
-def listdir(pth):
-    return [x for x in os.listdir(pth) if x != '.DS_Store']
 
 
 class QValGenModel:
@@ -43,7 +40,7 @@ class QValGenModel:
 
         # Load mapping of phone to id
         try:
-            file_name = config['dir']['dataset'] + 'lstm_mapping.json'
+            file_name = config['dir']['dataset'] + 'phone_mapping.json'
             with open(file_name, 'r') as f:
                 self.phone_to_id = json.load(f)
             self.phone_to_id = {k: v[0] for k, v in self.phone_to_id.items()}  # drop weight distribution

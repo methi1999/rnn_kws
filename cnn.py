@@ -14,7 +14,7 @@ config = read_yaml()
 np.random.seed(7)
 
 # Load mapping
-with open(config['dir']['dataset'] + 'lstm_mapping.json', 'r') as f:
+with open(config['dir']['dataset'] + 'phone_mapping.json', 'r') as f:
     phone_to_id = json.load(f)
     # drop weights
     phone_to_id = {k: v[0] for k, v in phone_to_id.items() if k != 'PAD'}

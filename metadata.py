@@ -7,22 +7,7 @@ import pickle
 import os
 import utils
 import json
-
-
-# Ignore DS_Store files found on Mac
-def listdir(pth):
-    return [x for x in os.listdir(pth) if x != '.DS_Store']
-
-
-# Convert from sample number to frame number
-# e.g. sample 34*160 is in frame 1 assuming 25ms windows, 10 ms hop (assuming 0-indexing)
-def sample_to_frame(num, rate=16000, window=25, hop=10):
-    multi = rate // (1000)
-    if num < window * multi:
-        return 0
-    else:
-        return (num - multi * window) // (multi * hop) + 1
-
+from utils import listdir
 
 class timit_data():
 
@@ -131,7 +116,7 @@ class timit_data():
 
             phones_to_id['PAD'] = (len(phones_to_id), 0)
             # Dump this mapping
-            fname = self.config['dir']['dataset'] + 'lstm_mapping.json'
+            fname = self.config['dir']['dataset'] + 'phone_mapping.json'
             with open(fname, 'w') as f:
                 json.dump(phones_to_id, f)
 

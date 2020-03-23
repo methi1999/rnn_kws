@@ -28,7 +28,7 @@ class timit_loader():
 
         # Load mapping
         try:
-            fname = config_file['dir']['dataset'] + 'lstm_mapping.json'
+            fname = config_file['dir']['dataset'] + 'phone_mapping.json'
             with open(fname, 'r') as f:
                 self.phone_to_id = json.load(f)
             # print("Phones and weights:", self.phone_to_id)
