@@ -45,5 +45,4 @@ cuda: True #whether to use NVIDIA cuda
 decode_type: 'max' #max or CTC
 gen_template: False
 infer_mode: 'group' # group or indi
-h_spike: 0.2 #minimum node probability to be considered in lattice
 prob_thesh_const: 10 #replace 0 in substitution matrix with min/this value

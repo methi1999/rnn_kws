@@ -344,7 +344,7 @@ class dl_model():
 
         with torch.no_grad():
             for i, (feat, path) in enumerate(features):
-                print(i,'/',len(features))
+                print(i, '/', len(features))
                 input_model = torch.from_numpy(np.array(feat)).float()[None, :, :]
                 cur_len = torch.from_numpy(np.array(lens[i:i+1])).long()
 
@@ -353,9 +353,9 @@ class dl_model():
                     cur_len = cur_len.cuda()
 
                 # Pass through model
-                output = self.model(input_model, cur_len).cpu().numpy()
+                output = self.model(input_model, cur_len).cpu().numpy()[0]
                 # Apply softmax
-                output = np.exp(output) / np.sum(np.exp(output), axis=1)[:, None]
+                output = utils.softmax(output)
                 final.append((output, path))
 
         id_to_phone = {v[0]: k for k, v in self.model.phone_to_id.items()}
@@ -398,10 +398,10 @@ class dl_model():
                 outputs = self.model(inputs, lens).cpu().numpy()
                 # Since only one example per batch and ignore blank token
                 outputs = outputs[0]
-                softmax = np.exp(outputs) / np.sum(np.exp(outputs), axis=1)[:, None]
+                # softmax = np.exp(outputs) / np.sum(np.exp(outputs), axis=1)[:, None]
                 # Take argmax to generate final string
                 argmaxed = np.argmax(outputs, axis=1)
-                # collapse according to CTC ruls
+                # collapse according to CTC rules
                 final_str = utils.ctc_collapse(argmaxed, self.model.blank_token_id)
                 ans = [id_to_phone[a] for a in final_str]
                 # Generate dumpable format of phone, start time and end time
@@ -505,7 +505,7 @@ def edit_distance(s1, s2):
     return dp[m][n], op_dict[m][n]
 
 
-def read_phones(phone_file_path, replacement):
+def read_phones(phone_file_path):
     """
     Read .PHN file and return a compressed sequence of phones
     :param phone_file_path: path of .PHN file
@@ -521,7 +521,7 @@ def read_phones(phone_file_path, replacement):
         s_e_i = phone[:-1].split(' ')  # start, end, phenome_name e.g. 0 5432 'aa'
         _, _, ph = int(s_e_i[0]), int(s_e_i[1]), s_e_i[2]
         # Collapse
-        for father, son in replacement.items():
+        for father, son in utils.replacement_dict().items():
             if ph in son:
                 ph = father
                 break
@@ -534,22 +534,40 @@ def read_phones(phone_file_path, replacement):
 if __name__ == '__main__':
     # a = dl_model('train')
     # a.train()
-    # a = dl_model('test')
-    # a.test()
-    a = dl_model('test_one')
-    wav_paths = []
-    base_pth = '../datasets/TIMIT/TEST/'
-    for dialect in sorted(utils.listdir(base_pth)):
-        for speaker_id in sorted(utils.listdir(os.path.join(base_pth, dialect))):
-            data = sorted(os.listdir(os.path.join(base_pth, dialect, speaker_id)))
-            wav_files = [x for x in data if x.split('.')[-1] == 'wav']  # all the .wav files
-            for wav_file in wav_files:
-                if wav_file in ['SA1.wav', 'SA2.wav']:
-                    wav_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file))
+    a = dl_model('test')
+    a.test()
+    # a = dl_model('test_one')
+    # wav_paths, label_paths = [], []
+    # base_pth = '../datasets/TIMIT/TEST/'
+    # for dialect in sorted(utils.listdir(base_pth)):
+    #     for speaker_id in sorted(utils.listdir(os.path.join(base_pth, dialect))):
+    #         data = sorted(os.listdir(os.path.join(base_pth, dialect, speaker_id)))
+    #         wav_files = [x for x in data if x.split('.')[-1] == 'wav']  # all the .wav files
+    #         for wav_file in wav_files:
+    #             if wav_file in ['SA1.wav', 'SA2.wav']:
+    #                 wav_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file))
+    #                 label_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file[:-3]+'PHN'))
+    #
+    # try:
+    #     with open('SA_res.pkl', 'rb') as f:
+    #         outputs, p_to_id = pickle.load(f)
+    # except:
+    #     outputs, p_to_id, id_to_p = a.test_one(wav_paths)
+    #     with open('SA_res.pkl', 'wb') as f:
+    #         pickle.dump((outputs, p_to_id, id_to_p), f)
+    #
+    # id_to_p = {v[0]: k for k, v in p_to_id.items()}
+    # print(id_to_p)
+    # for i, path in enumerate(label_paths):
+    #     gr_truth = read_phones(path)
+    #     print(gr_truth)
+    #     if 'p' or 'd' in gr_truth:
+    #         output = outputs[i][0]
+    #         argmaxed = np.argmax(output, axis=1)
+    #         print(argmaxed)
+    #         seq = utils.ctc_collapse(argmaxed, a.model.blank_token_id)
+    #         print([id_to_p[a] for a in seq], '*****\n')
 
-    outputs, p_to_id, id_to_p = a.test_one(wav_paths)
-    with open('SA_res.pkl', 'wb') as f:
-        pickle.dump((outputs, p_to_id), f)
 
     # print(output)
     # for i, _ in output:

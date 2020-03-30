@@ -9,6 +9,15 @@ def listdir(pth):
     return [x for x in os.listdir(pth) if x != '.DS_Store']
 
 
+def softmax(x):
+    """
+    Computes softmax for output of model
+    :param x: x has shape (time x number of classes)
+    :return: softmax(x)
+    """
+
+    return np.exp(x) / np.sum(np.exp(x), axis=1)[:, None]
+
 def replacement_dict():
 
     return {'aa': ['ao'], 'ah': ['ax', 'ax-h'], 'er': ['axr'], 'hh': ['hv'], 'ih': ['ix'],
@@ -85,7 +94,7 @@ def ctc_collapse(data, blank_id):
     final = []
     current_ph = data[0]
 
-    for i in range(2, len(data)):
+    for i in range(1, len(data)):
         now_ph = data[i]
         if now_ph == current_ph:
             continue
