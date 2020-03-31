@@ -12,11 +12,12 @@ def listdir(pth):
 def softmax(x):
     """
     Computes softmax for output of model
-    :param x: x has shape (time x number of classes)
+    :param x: x has shape (batch x time x number of classes)
     :return: softmax(x)
     """
 
-    return np.exp(x) / np.sum(np.exp(x), axis=1)[:, None]
+    return np.exp(x) / np.expand_dims(np.sum(np.exp(x), axis=-1), axis=-1)
+
 
 def replacement_dict():
 
@@ -69,7 +70,7 @@ def compress_seq(data):
     final = []
     current_ph, current_start_idx = data[0], 0
 
-    for i in range(2, len(data)):
+    for i in range(1, len(data)):
         now_ph = data[i]
         if now_ph == current_ph:
             # same so continue

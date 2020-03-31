@@ -23,7 +23,7 @@ def logsumexp(*args):
     return a_max + lsp
 
 
-def decode(probs, top_n, blank, beam_size=25):
+def decode(probs, top_n, blank, beam_size=100):
     """
     Performs inference for the given output probabilities.
 

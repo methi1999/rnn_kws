@@ -6,7 +6,7 @@ dir:
 
 train:
 
-  batch_size: 75
+  batch_size: 1
   
   epochs: 1500 #total no. of epochs to train
   
@@ -16,7 +16,7 @@ train:
   save_every: 50 #save models after how many epochs
   plot_every: 25 #save plots for test loss/train loss/accuracy
 
-  resume: False #resume training from saved model
+  resume: True #resume training from saved model
  
   loss_func: 'CTC' #loss function 
   optim: 'Adam' #optimiser to speed up training
@@ -24,7 +24,7 @@ train:
 
 test:
 
-  batch_size: 100
+  batch_size: 50
 
 
 n_fbank: 40 # 40 for fitlerbank energies
@@ -33,7 +33,7 @@ window_size: 0.025 #25 milliseconds
 window_step: 0.010 #10 ms
 num_phones: 39 #39 phone labels
 
-rnn: 'GRU'
+rnn: 'customLSTM'
 hidden_dim: 384 # 384 for best GRU
 num_layers: 5
 grad_clip: 3

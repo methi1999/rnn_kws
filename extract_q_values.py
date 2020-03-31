@@ -250,10 +250,10 @@ class QValGenModel:
             if cuda:
                 inputs = inputs.cuda()
                 input_lens = input_lens.cuda()
-                label_lens = label_lens.cuda()
 
             # forward pass
             outputs = self.rnn.model(inputs, input_lens).detach().cpu().numpy()
+            input_lens = input_lens.detach().cpu()
 
             # softmax
             for i in range(outputs.shape[0]):

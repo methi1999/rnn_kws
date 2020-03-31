@@ -31,9 +31,12 @@ class dl_model():
             from tcnn import TCN as Model
         elif self.config['rnn'] == 'BTCN':
             from tcnn import bidirectional_TCN as Model
+        elif 'custom' in self.config['rnn']:
+            from rnn import customRNN as Model
         else:
             print("Model import failed")
             exit(0)
+
         # Architecture name decides prefix for storing models and plots
         feature_dim = self.config['n_fbank'] + self.config['n_mfcc']
         self.arch_name = '_'.join(
@@ -253,9 +256,9 @@ class dl_model():
                         ctc_out = utils.ctc_collapse(seq, self.model.blank_token_id)
                     else:
                         # predict by CTC
-                        ctc_out = decode(outputs[i][:input_lens[i], :], 1, self.model.blank_token_id)[0][0]
+                        outputs = utils.softmax(outputs)
+                        ctc_out = decode(outputs[i, :input_lens[i], :], 1, self.model.blank_token_id)[0][0]
 
-                    # print(ctc_out)
                     # ground truth
                     gr_truth = list(labels[i][:label_lens[i]])
 
@@ -532,10 +535,10 @@ def read_phones(phone_file_path):
 
 
 if __name__ == '__main__':
-    # a = dl_model('train')
-    # a.train()
-    a = dl_model('test')
-    a.test()
+    a = dl_model('train')
+    a.train()
+    # a = dl_model('test')
+    # a.test()
     # a = dl_model('test_one')
     # wav_paths, label_paths = [], []
     # base_pth = '../datasets/TIMIT/TEST/'

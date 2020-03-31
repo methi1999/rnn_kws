@@ -495,7 +495,7 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_p
                str(num_compares) + '_' + str(num_none) + '.pkl'
 
     # generate cases to be tested on
-    cases = gen_cases('../datasets/TIMIT/TEST/','../datasets/TIMIT/TRAIN/',  pkl_name, num_templates, num_compares,
+    cases = gen_cases('../datasets/TIMIT/TEST/', '../datasets/TIMIT/TRAIN/',  pkl_name, num_templates, num_compares,
                       num_none, keywords, config['gen_template'])
 
     a = BatchTestModel(config, cases)
@@ -511,7 +511,7 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_p
         config = read_yaml()
         a = BatchTestModel(config, cases)
 
-        out_for_cnn = {}
+        # out_for_cnn = {}
 
         # Q values and probabilities are loaded. Important to load probability values from HERE since
         # they influence thresholds and Q-values
@@ -524,7 +524,7 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_p
         final_results = {}
         for kw in cases.keys():
             final_results[kw] = {}
-            out_for_cnn[kw] = []
+            # out_for_cnn[kw] = []
 
         # initialise model
         db, phone_to_id = a.get_outputs()
@@ -557,7 +557,7 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_p
                     (pred_phones, node_prob), final_lattice = traverse_best_lattice(lattices, dec_type, gr_phone_ids,
                                                                                     insert_prob, delete_prob,
                                                                                     replace_prob)
-                    out_for_cnn[word_in_clip].append((pred_phones, node_prob, word_in_clip == template_word))
+                    # out_for_cnn[word_in_clip].append((pred_phones, node_prob, word_in_clip == template_word))
                     # node probabilities of best lattice
                     substring_phones = [id_to_phone[x] for x in pred_phones]
                     final_lattice = [id_to_phone[x[0]] for x in final_lattice]
@@ -611,9 +611,9 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_p
             pickle.dump(final_results, f)
             print("Dumped final results of testing")
 
-        with open(cnn_dump_path, 'wb') as f:
-            pickle.dump((out_for_cnn, cases), f)
-            print("Dumped outputs for CNN training")
+        # with open(cnn_dump_path, 'wb') as f:
+        #     pickle.dump((out_for_cnn, cases), f)
+        #     print("Dumped outputs for CNN training")
 
     # grid search over parameter C
     if config['infer_mode'] == 'group':
@@ -747,14 +747,14 @@ if __name__ == "__main__":
     # for exp in list(np.arange(0.1, 3.1, 0.1)):
     #     final[exp] = batch_test('max', 5, 3, 8, 170, 'pickle/pr_' + str(i) + '.json',
     #                             'pickle/final_res_' + str(i) + '.pkl', 'incorrect/', exp)
-    
+
     #     os.remove('pickle/final_q_vals.pkl')
     #     i += 1
-    
+
     # print(max(final.values()), final)
     # with open('f.pkl', 'wb') as f:
     #     pickle.dump(final, f)
-    batch_test('max', 5, 3, 20, 250, 'pickle/pr_test.json', 'pickle/final_res_test.pkl', 'incorrect/', 'pickle/cnn.pkl',
+    batch_test('max', 5, 3, 8, 170, 'pickle/pr_test.json', 'pickle/final_res_test.pkl', 'incorrect/', 'pickle/cnn.pkl',
                exp_factor=1.3)
     # batch_test('max', 5, 3, 8, 170, 'pickle/pr_test.json', 'pickle/final_res_test.pkl', 'incorrect/', 'pickle/cnn.pkl', exp_factor=1.3)
     # batch_test('max', 3, 3, 2, 1, 'pickle/pr_test.json', 'pickle/pr_test.pkl', 'incorrect/')
