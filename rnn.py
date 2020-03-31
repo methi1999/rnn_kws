@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
-from custom_lstm import LayerNormLSTM
+import custom_rnn
 import json
 from generic_model import generic_model
 
@@ -28,27 +28,19 @@ class customRNN(generic_model):
 
         if config['bidirectional']:
             if self.rnn_name == 'customLSTM':
-                self.rnn = LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, True, 0.3, 0.3,
+                self.rnn = custom_rnn.LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, True, 0.3, 0.3,
                                          bidirectional=True, layer_norm_enabled=True)
-            else:
-                print("Not yet implemented")
-                exit(0)
-                self.rnn = nn.GRU(input_size=self.feat_dim, hidden_size=self.hidden_dim, num_layers=self.num_layers,
-                                  dropout=0.3,
-                                  bidirectional=True, batch_first=True)
+            elif self.rnn_name == 'customliGRU':
+                self.rnn = custom_rnn.customliGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=True)
 
             # In linear network, *2 for bidirectional
             self.hidden2phone = nn.Linear(self.hidden_dim * 2, self.output_dim)
         else:
             if self.rnn_name == 'customLSTM':
-                self.rnn = LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, True, 0.2, 0.2,
+                self.rnn = custom_rnn.LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, True, 0.2, 0.2,
                                          bidirectional=False, layer_norm_enabled=True)
             else:
-                print("Not yet implemented")
-                exit(0)
-                self.rnn = nn.GRU(input_size=self.feat_dim, hidden_size=self.hidden_dim, num_layers=self.num_layers,
-                                  dropout=0.3,
-                                  bidirectional=True, batch_first=True)
+                self.rnn = custom_rnn.customliGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=False)
 
             # In linear network, *2 for bidirectional
             self.hidden2phone = nn.Linear(self.hidden_dim, self.output_dim)  # for pad token

@@ -118,78 +118,87 @@ class dl_model():
 
         for epoch in range(self.start_epoch, self.total_epochs + 1):
 
-            print("Epoch:", str(epoch))
-            epoch_loss = 0.0
-            # i used for monitoring batch and printing loss, etc.
-            i = 0
+            try:
 
-            while True:
+                print("Epoch:", str(epoch))
+                epoch_loss = 0.0
+                # i used for monitoring batch and printing loss, etc.
+                i = 0
 
-                i += 1
+                while True:
 
-                # Get batch of feature vectors, labels and lengths along with status (when to end epoch)
-                inputs, labels, input_lens, label_lens, status = self.train_loader.return_batch()
-                # print(input_lens, label_lens)
-                inputs, labels, = torch.from_numpy(np.array(inputs)).float(), torch.from_numpy(np.array(labels)).long()
-                input_lens, label_lens = torch.from_numpy(np.array(input_lens)).long(), torch.from_numpy(
-                    np.array(label_lens)).long()
+                    i += 1
 
-                if self.cuda:
-                    inputs = inputs.cuda()
-                    labels = labels.cuda()
-                    input_lens = input_lens.cuda()
-                    label_lens = label_lens.cuda()
+                    # Get batch of feature vectors, labels and lengths along with status (when to end epoch)
+                    inputs, labels, input_lens, label_lens, status = self.train_loader.return_batch()
+                    # print(input_lens, label_lens)
+                    inputs, labels, = torch.from_numpy(np.array(inputs)).float(), torch.from_numpy(np.array(labels)).long()
+                    input_lens, label_lens = torch.from_numpy(np.array(input_lens)).long(), torch.from_numpy(
+                        np.array(label_lens)).long()
 
-                # zero the parameter gradients
-                self.model.optimizer.zero_grad()
-                # forward + backward + optimize
-                outputs = self.model(inputs, input_lens)
-                loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
-                loss.backward()
+                    if self.cuda:
+                        inputs = inputs.cuda()
+                        labels = labels.cuda()
+                        input_lens = input_lens.cuda()
+                        label_lens = label_lens.cuda()
 
-                # clip gradient
-                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['grad_clip'])
-                self.model.optimizer.step()
+                    # zero the parameter gradients
+                    self.model.optimizer.zero_grad()
+                    # forward + backward + optimize
+                    outputs = self.model(inputs, input_lens)
+                    loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
+                    loss.backward()
 
-                # store loss
-                epoch_loss += loss.item()
+                    # clip gradient
+                    # torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['grad_clip'])
+                    self.model.optimizer.step()
 
-                # print loss
-                if i in print_range:
-                    try:
-                        print('After %i batches, Current Loss = %.7f, Avg. Loss = %.7f' % (
-                            i, epoch_loss / i, np.mean(np.array([x[0] for x in self.train_losses]))))
-                    except:
-                        pass
+                    # store loss
+                    epoch_loss += loss.item()
 
-                # test model periodically
-                if i in test_range:
+                    # print loss
+                    if i in print_range:
+                        try:
+                            print('After %i batches, Current Loss = %.7f, Avg. Loss = %.7f' % (
+                                i, epoch_loss / i, np.mean(np.array([x[0] for x in self.train_losses]))))
+                        except:
+                            pass
+
+                    # test model periodically
+                    if i in test_range:
+                        self.test(epoch)
+                        self.model.train()
+
+                    # Reached end of dataset
+                    if status == 1:
+                        break
+
+                # Store tuple of training loss and epoch number
+                self.train_losses.append((epoch_loss / len(self.train_loader), epoch))
+
+                # test every 5 epochs in the beginning and then every fixed no of epochs specified in config file
+                # useful to see how loss stabilises in the beginning
+                # save model
+                if epoch % self.save_every == 0:
+                    self.model.save_model(False, epoch, self.train_losses, self.test_losses, self.edit_dist,
+                                          self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
+
+                if epoch % 5 == 0 and epoch < self.test_every:
                     self.test(epoch)
                     self.model.train()
+                elif epoch % self.test_every == 0:
+                    self.test(epoch)
+                    self.model.train()
+                # plot loss and accuracy
+                if epoch % self.plot_every == 0:
+                    self.plot_loss_acc(epoch)
 
-                # Reached end of dataset
-                if status == 1:
-                    break
-
-            # Store tuple of training loss and epoch number
-            self.train_losses.append((epoch_loss / len(self.train_loader), epoch))
-
-            # test every 5 epochs in the beginning and then every fixed no of epochs specified in config file
-            # useful to see how loss stabilises in the beginning
-            # save model
-            if epoch % self.save_every == 0:
-                self.model.save_model(False, epoch, self.train_losses, self.test_losses, self.edit_dist,
+            except KeyboardInterrupt:
+                print("Saving model before quitting")
+                self.model.save_model(False, epoch-1, self.train_losses, self.test_losses, self.edit_dist,
                                       self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
+                exit(0)
 
-            if epoch % 5 == 0 and epoch < self.test_every:
-                self.test(epoch)
-                self.model.train()
-            elif epoch % self.test_every == 0:
-                self.test(epoch)
-                self.model.train()
-            # plot loss and accuracy
-            if epoch % self.plot_every == 0:
-                self.plot_loss_acc(epoch)
 
     # test model
     def test(self, epoch=None):
