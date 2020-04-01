@@ -6,7 +6,7 @@ dir:
 
 train:
 
-  batch_size: 80
+  batch_size: 50
   
   epochs: 1500 #total no. of epochs to train
   
@@ -24,7 +24,7 @@ train:
 
 test:
 
-  batch_size: 100
+  batch_size: 75
 
 
 n_fbank: 40 # 40 for fitlerbank energies
@@ -33,7 +33,7 @@ window_size: 0.025 #25 milliseconds
 window_step: 0.010 #10 ms
 num_phones: 39 #39 phone labels
 
-rnn: 'customliGRU'
+rnn: 'customGRU'
 hidden_dim: 384 # 384 for best GRU
 num_layers: 5
 grad_clip: 3

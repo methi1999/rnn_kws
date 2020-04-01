@@ -28,8 +28,10 @@ class customRNN(generic_model):
 
         if config['bidirectional']:
             if self.rnn_name == 'customLSTM':
-                self.rnn = custom_rnn.LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, True, 0.3, 0.3,
-                                         bidirectional=True, layer_norm_enabled=True)
+                self.rnn = custom_rnn.LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, 0.3, 0.3,
+                                                    bidirectional=True, layer_norm_enabled=True)
+            elif self.rnn_name == 'customGRU':
+                self.rnn = custom_rnn.customGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=True)
             elif self.rnn_name == 'customliGRU':
                 self.rnn = custom_rnn.customliGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=True)
 
@@ -37,9 +39,11 @@ class customRNN(generic_model):
             self.hidden2phone = nn.Linear(self.hidden_dim * 2, self.output_dim)
         else:
             if self.rnn_name == 'customLSTM':
-                self.rnn = custom_rnn.LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, True, 0.2, 0.2,
-                                         bidirectional=False, layer_norm_enabled=True)
-            else:
+                self.rnn = custom_rnn.LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, 0.2, 0.2,
+                                                    bidirectional=False, layer_norm_enabled=True)
+            elif self.rnn_name == 'customGRU':
+                self.rnn = custom_rnn.customGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=True)
+            elif self.rnn_name == 'customliGRU':
                 self.rnn = custom_rnn.customliGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=False)
 
             # In linear network, *2 for bidirectional
