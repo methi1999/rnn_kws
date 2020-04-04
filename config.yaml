@@ -6,7 +6,7 @@ dir:
 
 train:
 
-  batch_size: 50
+  batch_size: 40
   
   epochs: 1500 #total no. of epochs to train
   
@@ -24,7 +24,7 @@ train:
 
 test:
 
-  batch_size: 75
+  batch_size: 40
 
 
 n_fbank: 40 # 40 for fitlerbank energies
@@ -36,10 +36,13 @@ num_phones: 39 #39 phone labels
 rnn: 'customGRU'
 hidden_dim: 384 # 384 for best GRU
 num_layers: 5
+dropout: 0.2
+r_dropout: 0.2
 grad_clip: 3
 weighted_loss: False
 std_multiplier: 5
 bidirectional: True
+layerNorm: True
 cuda: True #whether to use NVIDIA cuda
 
 decode_type: 'max' #max or CTC

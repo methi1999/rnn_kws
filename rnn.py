@@ -25,13 +25,18 @@ class customRNN(generic_model):
         self.output_dim = self.num_phones + 2  # 1 for pad and 1 for blank
         self.blank_token_id = self.num_phones + 1
         self.pad_token_id = self.num_phones
+        self.num_directions = 2 if config['bidirectional'] else 1
+
+        dropout, r_dropout = config['dropout'], config['r_dropout']
+        layer_norm = config['layerNorm']
 
         if config['bidirectional']:
             if self.rnn_name == 'customLSTM':
                 self.rnn = custom_rnn.LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, 0.3, 0.3,
                                                     bidirectional=True, layer_norm_enabled=True)
             elif self.rnn_name == 'customGRU':
-                self.rnn = custom_rnn.customGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=True)
+                self.rnn = custom_rnn.customGRU(self.feat_dim, self.hidden_dim, self.num_layers, dropout=dropout,
+                                                layer_norm_enabled=layer_norm, r_dropout=r_dropout, bidirectional=True)
             elif self.rnn_name == 'customliGRU':
                 self.rnn = custom_rnn.customliGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=True)
 
@@ -42,7 +47,8 @@ class customRNN(generic_model):
                 self.rnn = custom_rnn.LayerNormLSTM(self.feat_dim, self.hidden_dim, self.num_layers, 0.2, 0.2,
                                                     bidirectional=False, layer_norm_enabled=True)
             elif self.rnn_name == 'customGRU':
-                self.rnn = custom_rnn.customGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=True)
+                self.rnn = custom_rnn.customGRU(self.feat_dim, self.hidden_dim, self.num_layers, dropout=dropout,
+                                                layer_norm_enabled=layer_norm, r_dropout=r_dropout, bidirectional=True)
             elif self.rnn_name == 'customliGRU':
                 self.rnn = custom_rnn.customliGRU(self.feat_dim, self.hidden_dim, self.num_layers, bidirectional=False)
 
@@ -81,20 +87,23 @@ class customRNN(generic_model):
             print("Can't find phone mapping")
             exit(0)
 
-    def forward(self, x, x_lens):
+    def forward(self, x, x_lens, dropout_mask_reset=None):
         """
         Forward pass through RNN
+        :param dropout_mask_reset: recurrent dropout
         :param x: input tensor of shape (batch size, max sequence length, feat_dim)
         :param x_lens: actual lengths of each sequence < max sequence length (since padded with zeros)
         :return: tensor of shape (batch size, max sequence length, output dim)
         """
+        if dropout_mask_reset is None:
+            dropout_mask_reset = [False] * (self.num_layers * self.num_directions)
 
         batch_size, seq_len, _ = x.size()
         # Dim transformation: (batch_size, seq_len, embedding_dim) -> (batch_size, seq_len, nb_lstm_units)
         # pack_padded_sequence so that padded items in the sequence won't be shown to the LSTM
         X = torch.nn.utils.rnn.pack_padded_sequence(x, x_lens, batch_first=True)
         # now run through LSTM
-        X, _ = self.rnn(X)
+        X, _ = self.rnn(X, dropout_mask_reset)
         # undo the packing operation
         X, _ = torch.nn.utils.rnn.pad_packed_sequence(X, batch_first=True)
         # ---------------------

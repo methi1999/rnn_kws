@@ -7,6 +7,7 @@ from extract_q_values import find_batch_q
 import scipy.io.wavfile as wav
 import pickle
 import os
+import time
 import numpy as np
 from dl_model import dl_model
 from hypo_search import generate_lattice, traverse_best_lattice, find_q_values
@@ -706,7 +707,9 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_p
 
     np.random.shuffle(wrong)
 
-    for (wav_path, template_word, gr_phone_entire_clip, final_lattice, substring_phones, gr_phones) in wrong[:100]:
+    for (wav_path, template_word, gr_phone_entire_clip, final_lattice, substring_phones, gr_phones) in wrong[:20]:
+
+        gr_phones = list(gr_phones)
 
         if template_word not in word_name_dict:
             word_name_dict[template_word] = 0
@@ -742,20 +745,22 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_p
 if __name__ == "__main__":
     # word_distribution('../datasets/TIMIT/TEST/')
 
-    # final = {}
-    # i = 0
-    # for exp in list(np.arange(0.1, 3.1, 0.1)):
-    #     final[exp] = batch_test('max', 5, 3, 8, 170, 'pickle/pr_' + str(i) + '.json',
-    #                             'pickle/final_res_' + str(i) + '.pkl', 'incorrect/', exp)
-
-    #     os.remove('pickle/final_q_vals.pkl')
-    #     i += 1
+    final = {}
+    i = 0
+    for exp in list(np.arange(0.2, 3.1, 0.1)):
+        start = time.time()
+        print("Starting at:", start)
+        final[exp] = batch_test('max', 5, 3, 8, 170, 'pickle/pr_' + str(i) + '.json',
+                                'pickle/final_res_' + str(i) + '.pkl', 'incorrect/', exp)
+        print("Ended at:", time.time()-start)
+        os.remove('pickle/final_q_vals.pkl')
+        i += 1
 
     # print(max(final.values()), final)
     # with open('f.pkl', 'wb') as f:
     #     pickle.dump(final, f)
-    batch_test('max', 5, 3, 8, 170, 'pickle/pr_test.json', 'pickle/final_res_test.pkl', 'incorrect/', 'pickle/cnn.pkl',
-               exp_factor=1.3)
+    # batch_test('max', 5, 3, 8, 170, 'pickle/pr_test.json', 'pickle/final_res_test.pkl', 'incorrect/', 'pickle/cnn.pkl',
+    #            exp_factor=1.3)
     # batch_test('max', 5, 3, 8, 170, 'pickle/pr_test.json', 'pickle/final_res_test.pkl', 'incorrect/', 'pickle/cnn.pkl', exp_factor=1.3)
     # batch_test('max', 3, 3, 2, 1, 'pickle/pr_test.json', 'pickle/pr_test.pkl', 'incorrect/')
     # batch_test('max', 3, 3, 20, 1000000, 'pickle/pr_full.json', 'pickle/pr_full.pkl', 'incorrect/')

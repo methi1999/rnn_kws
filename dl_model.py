@@ -118,6 +118,8 @@ class dl_model():
 
         for epoch in range(self.start_epoch, self.total_epochs + 1):
 
+            dropout_mask_reset = [True] * (self.model.num_layers * (1 + self.config['bidirectional']))
+
             try:
 
                 print("Epoch:", str(epoch))
@@ -145,24 +147,24 @@ class dl_model():
                     # zero the parameter gradients
                     self.model.optimizer.zero_grad()
                     # forward + backward + optimize
-                    outputs = self.model(inputs, input_lens)
+                    outputs = self.model(inputs, input_lens, dropout_mask_reset)
+                    dropout_mask_reset = [False] * (self.model.num_layers * (1 + self.config['bidirectional']))
                     loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
                     loss.backward()
 
                     # clip gradient
-                    # torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['grad_clip'])
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['grad_clip'])
                     self.model.optimizer.step()
 
                     # store loss
                     epoch_loss += loss.item()
 
                     # print loss
-                    if i in print_range:
-                        try:
-                            print('After %i batches, Current Loss = %.7f, Avg. Loss = %.7f' % (
+                    if i in print_range and epoch == 1:
+                        print('After %i batches, Current Loss = %.7f' % (i, epoch_loss / i))
+                    elif i in print_range and epoch > 1:
+                        print('After %i batches, Current Loss = %.7f, Avg. Loss = %.7f' % (
                                 i, epoch_loss / i, np.mean(np.array([x[0] for x in self.train_losses]))))
-                        except:
-                            pass
 
                     # test model periodically
                     if i in test_range:
@@ -226,6 +228,8 @@ class dl_model():
 
         with torch.no_grad():
 
+            dropout_mask_reset = [True] * (self.model.num_layers * (1 + self.config['bidirectional']))
+
             while True:
 
                 # retrieve batch from dataloader
@@ -245,7 +249,8 @@ class dl_model():
                 self.model.optimizer.zero_grad()
 
                 # forward + backward + optimize
-                outputs = self.model(inputs, input_lens)
+                outputs = self.model(inputs, input_lens, dropout_mask_reset)
+                dropout_mask_reset = [False] * (self.model.num_layers * (1 + self.config['bidirectional']))
                 loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
                 test_loss += loss.item()
 
@@ -322,6 +327,12 @@ class dl_model():
                 prob_del[ph] = data['deletions'] / data['total']
                 prob_substi[ph] = data['substitutions'] / data['total']
 
+                # Dump best probability
+                prob_dump_path = self.config['dir']['pickle'] + self.arch_name + '_probs.pkl'
+                with open(prob_dump_path, 'wb') as f:
+                    pickle.dump((prob_insert, prob_del, prob_substi), f)
+                    print("Dumped probabilities")
+
         if self.mode == 'train':
             # Dump probabilities
             prob_dump_path = self.config['dir']['pickle'] + self.arch_name + '_probs_'+ str(epoch) + '.pkl'
@@ -351,7 +362,6 @@ class dl_model():
             lens.append(tsteps)
 
         final = []
-
         self.model.eval()
 
         with torch.no_grad():
@@ -423,7 +433,7 @@ class dl_model():
 
             # If .PHN file exists, report edit distance
             if os.path.exists(phone_path):
-                truth = read_phones(phone_path, self.replacement)
+                truth = read_phones(phone_path)
                 edit_dist, ops = edit_distance(truth, ans)
                 print("Ground Truth:", truth, '\nEdit dsitance:', edit_dist)
 
@@ -446,25 +456,28 @@ class dl_model():
         """
 
         plt.clf()
-        plt.plot([x[1] for x in self.train_losses], [x[0] for x in self.train_losses], c='r', label='Train')
-        plt.plot([x[1] for x in self.test_losses], [x[0] for x in self.test_losses], c='b', label='Test')
-        plt.title("Train/Test loss")
-        plt.xlabel("Epochs")
-        plt.ylabel("Loss")
+        fig, ax1 = plt.subplots()
+
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('Loss')
+        ax1.plot([x[1] for x in self.train_losses], [x[0] for x in self.train_losses], color='r', label='Train Loss')
+        ax1.plot([x[1] for x in self.test_losses], [x[0] for x in self.test_losses], color='b', label='Test Loss')
+        ax1.tick_params(axis='y')
+        ax1.legend(loc='upper left')
+
+        ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+
+        ax2.set_ylabel('PER')  # we already handled the x-label with ax1
+        ax2.plot([x[1] for x in self.edit_dist], [x[0] for x in self.edit_dist], color='g', label='PER')
+        ax2.tick_params(axis='y')
+        ax2.legend(loc='upper right')
+
+        fig.tight_layout()  # otherwise the right y-label is slightly clipped
+        plt.grid(True)
         plt.legend()
-        plt.grid(True)
+        plt.title(self.arch_name)
 
-        filename = self.plots_dir + 'loss' + '_' + str(epoch) + '.png'
-        plt.savefig(filename)
-
-        plt.clf()
-        plt.plot([x[1] for x in self.edit_dist], [x[0] for x in self.edit_dist], c='r')
-        plt.title("Edit distance")
-        plt.xlabel("Epochs")
-        plt.ylabel("Edit distance")
-        plt.grid(True)
-
-        filename = self.plots_dir + 'test_acc' + '_' + str(epoch) + '.png'
+        filename = self.plots_dir + 'plot_' + self.arch_name + '_' + str(epoch) + '.png'
         plt.savefig(filename)
 
         print("Saved plots")

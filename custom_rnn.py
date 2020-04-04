@@ -355,7 +355,7 @@ class LayerNormLSTMCell(nn.Module):
         fiou_linear_tensors = tuple(ln(tensor) for ln, tensor in zip(self.fiou_ln_layers, fiou_linear_tensors))
         # apply non-linear activation
         f, i, o = tuple(torch.sigmoid(tensor) for tensor in fiou_linear_tensors[:3])
-        # apply dropout to cell state. Shouldn't it be at the output?
+        # apply dropout to cell state.
         u = self.dropout(torch.tanh(fiou_linear_tensors[3]))
         # update cell state
         new_cell = self.cell_ln(i * u + (f * cell_tensor))
@@ -382,7 +382,7 @@ class LayerNormLSTM(LSTMFrame):
 
 
 class GRUFrame(nn.Module):
-    def __init__(self, rnn_cells, dropout=0.3, bidirectional=False):
+    def __init__(self, rnn_cells, dropout, bidirectional=False):
         """
         :param rnn_cells: example: [(cell_0_f, cell_0_b), (cell_1_f, cell_1_b), ..]
                           They are LSTMCells/RNNCells/GRUCells objects
@@ -433,14 +433,13 @@ class GRUFrame(nn.Module):
         # stitch them back and return
         return torch.cat(shifted_seqs, dim=1)
 
-    def forward(self, input, init_hidden=None):
+    def forward(self, input, dropout_mask_reset, init_hidden=None):
         """
         :param input: a tensor(s) of shape (seq_len, batch, input_size)
-        :param init_state: (h_0, c_0) where the size of both is (num_layers * num_directions, batch, hidden_size)
+        :param init_hidden: hidden state
         :returns:
         - output: (seq_len, batch, num_directions * hidden_size)
         - h_n: (num_layers * num_directions, batch, hidden_size)
-        - c_n: (num_layers * num_directions, batch, hidden_size)
         """
         # PackedSequence object holds the data and batch sizes.
         if isinstance(input, torch.nn.utils.rnn.PackedSequence):
@@ -499,7 +498,8 @@ class GRUFrame(nn.Module):
                     # if not uniform_length:  # for speed enhancement
                     #     cell_input = cell_input[:valid_example_nums[seq_idx]]
                     #     step_state = step_state[:valid_example_nums[seq_idx]]
-                    h = step_state = cell(cell_input, step_state)
+                    h = step_state = cell(cell_input, step_state, dropout_mask_reset[state_idx])
+                    dropout_mask_reset[state_idx] = False
                     # if uniform_length:
                     direction_output[seq_idx] = h
                     step_state_list.append(step_state)
@@ -548,7 +548,7 @@ class GRUCell(nn.Module):
     - https://github.com/tensorflow/tensorflow/blob/r1.12/tensorflow/contrib/rnn/python/ops/rnn_cell.py#L1335
     """
 
-    def __init__(self, input_size, hidden_size, layer_norm_enabled=True, cell_ln=None, r_dropout=None):
+    def __init__(self, input_size, hidden_size, layer_norm_enabled, r_dropout=None):
         super().__init__()
 
         self.input_size = input_size
@@ -565,11 +565,9 @@ class GRUCell(nn.Module):
 
         self.layer_norm_enabled = layer_norm_enabled
         if layer_norm_enabled:
-            self.ln_layers = nn.ModuleList(nn.LayerNorm(hidden_size) for _ in range(3))
-            self.cell_ln = nn.LayerNorm(hidden_size) if cell_ln is None else cell_ln
+            self.ln_layers = nn.ModuleList(nn.LayerNorm(hidden_size) for _ in range(2))
         else:
-            # assert cell_ln is None
-            assert cell_ln is None
+            self.ln_layers = (no_layer_norm,) * 2
             # bias vectors for our hidden layer
             if torch.cuda.is_available():
                 self.bz = torch.zeros(hidden_size, requires_grad=True).cuda()
@@ -582,49 +580,68 @@ class GRUCell(nn.Module):
 
         if r_dropout is not None:
             # recurrent dropout. NOT YET IMPLEMENTED. READ ABOUT IT
-            if isinstance(r_dropout, nn.Dropout):
-                self.dropout = r_dropout
-            elif r_dropout > 0:
-                self.dropout = nn.Dropout(r_dropout)
-            else:
-                self.dropout = no_dropout
+            self.r_dropout = r_dropout
 
-    def forward(self, input, hidden_state):
+        self._input_dropout_mask = self._h_dropout_mask = self.h_update_mask = None
+
+    def set_dropout_masks(self, input_size, batch_size):
+        if self.r_dropout:
+            if self.training:
+                self._input_dropout_mask = torch.bernoulli(torch.ones(3, batch_size, input_size)*(1 - self.r_dropout))
+                self._h_dropout_mask = torch.bernoulli(torch.ones(3, batch_size, self.hidden_size)*(1 - self.r_dropout))
+                # self.h_update_mask = torch.bernoulli(torch.ones(batch_size, self.hidden_size)*(1 - self.r_dropout))
+                self._input_dropout_mask.requires_grad = False
+                self._h_dropout_mask.requires_grad = False
+                # self.h_update_mask.requires_grad = False
+
+                if torch.cuda.is_available():
+                    self._input_dropout_mask = self._input_dropout_mask.cuda()
+                    self._h_dropout_mask = self._h_dropout_mask.cuda()
+                    # self.h_update_mask = self.h_update_mask.cuda()
+            else:
+                self._input_dropout_mask = self._h_dropout_mask = [1. - self.r_dropout] * 3
+                # self.h_update_mask = 1. - self.r_dropout
+        else:
+            self._input_dropout_mask = self._h_dropout_mask = [1.0] * 3
+            # self.h_update_mask = 1.0
+
+    def forward(self, input, hidden_state, dropout_mask_reset):
         """
         :param input: a tensor of of shape (batch_size, input_size)
-        :param state: a pair of a hidden tensor and a cell tensor whose shape is (batch_size, hidden_size).
+        :param hidden_state: a pair of a hidden tensor and a cell tensor whose shape is (batch_size, hidden_size).
                       ex. (h_0, c_0)
-        :returns: hidden state and cell state
+        :returns: new hidden state
         """
+        to_update = self._input_dropout_mask is None or dropout_mask_reset is True or\
+                    (torch.is_tensor(self._input_dropout_mask) and self._input_dropout_mask.size(1) != input.size(0))
+        if to_update:
+            self.set_dropout_masks(input.size(1), input.size(0))
+
         # pass input through all gates
-        if self.layer_norm_enabled:
-            z = self.wz(input) + self.uz(hidden_state)
-            r = self.wr(input) + self.ur(hidden_state)
-            h_hat = self.wh(input) + r * self.uh(hidden_state)
-            z, r, h_hat = tuple(ln(tensor) for ln, tensor in zip(self.ln_layers, (z, r, h_hat)))
-            z, r, h_hat = torch.sigmoid(z), torch.sigmoid(r), torch.tan(h_hat)
-        else:
-            z = torch.sigmoid(self.wz(input) + self.uz(hidden_state) + self.bz)
-            r = torch.sigmoid(self.wr(input) + self.ur(hidden_state) + self.br)
-            h_hat = torch.tanh(self.wh(input) + r * self.uh(hidden_state) + self.bh)
+        z = self.wz(self._input_dropout_mask[0]*input) + self.uz(self._h_dropout_mask[0]*hidden_state)
+        r = self.wr(self._input_dropout_mask[1]*input) + self.ur(self._h_dropout_mask[1]*hidden_state)
+        z, r = tuple(ln(tensor) for ln, tensor in zip(self.ln_layers, (z, r)))
+
+        z, r = torch.sigmoid(z), torch.sigmoid(r)
+        h_hat = torch.tanh(self.wh(self._input_dropout_mask[2]*input) + r * self.uh(self._h_dropout_mask[2]*hidden_state))
 
         new_h = z * hidden_state + (1-z)*h_hat
-
         return new_h
 
 
 class customGRU(GRUFrame):
-    def __init__(self, input_size, hidden_size, num_layers, r_dropout=0.0, bidirectional=False):
+    def __init__(self, input_size, hidden_size, num_layers, dropout, r_dropout, layer_norm_enabled, bidirectional=False):
         rnn_cells = tuple(
             tuple(
                 GRUCell(
                     input_size if layer_idx == 0 else hidden_size * (2 if bidirectional else 1),
                     hidden_size,
+                    layer_norm_enabled=layer_norm_enabled,
                     r_dropout=r_dropout)
                 for _ in range(2 if bidirectional else 1))
             for layer_idx in range(num_layers))
 
-        super().__init__(rnn_cells=rnn_cells, bidirectional=bidirectional)
+        super().__init__(rnn_cells=rnn_cells, dropout=dropout, bidirectional=bidirectional)
 
 
 class liGRUFrame(nn.Module):
