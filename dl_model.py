@@ -558,50 +558,34 @@ def read_phones(phone_file_path):
 
 
 if __name__ == '__main__':
+
     a = dl_model('train')
     a.train()
+
     # a = dl_model('test')
     # a.test()
-    # a = dl_model('test_one')
-    # wav_paths, label_paths = [], []
-    # base_pth = '../datasets/TIMIT/TEST/'
-    # for dialect in sorted(utils.listdir(base_pth)):
-    #     for speaker_id in sorted(utils.listdir(os.path.join(base_pth, dialect))):
-    #         data = sorted(os.listdir(os.path.join(base_pth, dialect, speaker_id)))
-    #         wav_files = [x for x in data if x.split('.')[-1] == 'wav']  # all the .wav files
-    #         for wav_file in wav_files:
-    #             if wav_file in ['SA1.wav', 'SA2.wav']:
-    #                 wav_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file))
-    #                 label_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file[:-3]+'PHN'))
-    #
-    # try:
-    #     with open('SA_res.pkl', 'rb') as f:
-    #         outputs, p_to_id = pickle.load(f)
-    # except:
-    #     outputs, p_to_id, id_to_p = a.test_one(wav_paths)
-    #     with open('SA_res.pkl', 'wb') as f:
-    #         pickle.dump((outputs, p_to_id, id_to_p), f)
-    #
-    # id_to_p = {v[0]: k for k, v in p_to_id.items()}
-    # print(id_to_p)
-    # for i, path in enumerate(label_paths):
-    #     gr_truth = read_phones(path)
-    #     print(gr_truth)
-    #     if 'p' or 'd' in gr_truth:
-    #         output = outputs[i][0]
-    #         argmaxed = np.argmax(output, axis=1)
-    #         print(argmaxed)
-    #         seq = utils.ctc_collapse(argmaxed, a.model.blank_token_id)
-    #         print([id_to_p[a] for a in seq], '*****\n')
 
-
-    # print(output)
-    # for i, _ in output:
-        # print(i.shape)
-        # print(np.argmax(i[0], axis=1))
-    # with open('test_res.pkl', 'wb') as f:
-    #     pickle.dump(output, f)
-    # a.test_folder('trial/')
-    # a = [1, 1, 2, 3, 4, 4, 5]
-    # b = [1, 2, 2, 3, 4, 5]
-    # print(edit_distance(a, b))
+    """
+    Example usage for testing model on SA1 and SA2 sentences
+    
+    # declare model
+    a = dl_model('test_one')
+    
+    # store wav path in a list
+    wav_paths, label_paths = [], []
+    base_pth = '../datasets/TIMIT/TEST/'
+    for dialect in sorted(utils.listdir(base_pth)):
+        for speaker_id in sorted(utils.listdir(os.path.join(base_pth, dialect))):
+            data = sorted(os.listdir(os.path.join(base_pth, dialect, speaker_id)))
+            wav_files = [x for x in data if x.split('.')[-1] == 'wav']  # all the .wav files
+            for wav_file in wav_files:
+                if wav_file in ['SA1.wav', 'SA2.wav']:
+                    wav_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file))
+                    label_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file[:-3]+'PHN'))
+    
+    # pass this list to model for inference                
+    outputs, p_to_id, id_to_p = a.test_one(wav_paths)
+    # dump results
+    with open('SA_res.pkl', 'wb') as f:
+        pickle.dump((outputs, p_to_id, id_to_p), f)
+    """
