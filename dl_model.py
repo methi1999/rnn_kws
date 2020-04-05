@@ -367,6 +367,7 @@ class dl_model():
         with torch.no_grad():
             for i, (feat, path) in enumerate(features):
                 print(i, '/', len(features))
+                # prepare inputs for passing through model
                 input_model = torch.from_numpy(np.array(feat)).float()[None, :, :]
                 cur_len = torch.from_numpy(np.array(lens[i:i+1])).long()
 
