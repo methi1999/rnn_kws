@@ -9,7 +9,8 @@ import utils
 import json
 from utils import listdir
 
-class timit_data():
+
+class timit_metadata:
 
     def __init__(self, type_, config_file):
 
@@ -63,15 +64,15 @@ class timit_data():
                                                winstep=self.config['window_step'],
                                                fbank_filt=self.config['n_fbank'], mfcc_filt=self.config['n_mfcc'])
 
-                    phenome_path = wav_path[:-3] + 'PHN'  # file which contains the phenome location data
+                    phone_path = wav_path[:-3] + 'PHN'  # file which contains the phenome location data
                     # phones in current wav file
                     cur_phones = []
 
-                    with open(phenome_path, 'r') as f:
+                    with open(phone_path, 'r') as f:
                         a = f.readlines()
 
-                    for phenome in a:
-                        s_e_i = phenome[:-1].split(' ')  # start, end, phenome_name e.g. 0 5432 'aa'
+                    for phone in a:
+                        s_e_i = phone[:-1].split(' ')  # start, end, phenome_name e.g. 0 5432 'aa'
                         start, end, ph = int(s_e_i[0]), int(s_e_i[1]), s_e_i[2]
 
                         # collapse into father phone
@@ -91,30 +92,29 @@ class timit_data():
                     list_features.append(final_vec)
                     list_phones.append(cur_phones)
 
-        # Each item in to_return is a list corresponding to a single recording
-        # Each recording is in turn a list of tuples of (ph, feature_vector) for each frame
-
         if self.mode == 'TRAIN':
 
             # Normalise feature vectors
-            np_arr = np.concatenate(list_features, axis=0)
-            print(np_arr.shape)
-            np_mean = np.mean(np_arr, axis=0)
-            np_std = np.std(np_arr, axis=0)
+            # np_arr = np.concatenate(list_features, axis=0)
+            # print(np_arr.shape)
+            # np_mean = np.mean(np_arr, axis=0)
+            # np_std = np.std(np_arr, axis=0)
             # np_mean = np.zeros(np_mean.shape)
             # np_std = np.ones(np_std.shape)
-            print("Mean:", np_mean, "\nStd. Dev:", np_std)
-
-            # Weights are inversely proportional to number of phones encountered
-            num_distribution = {k: 1 / v for k, v in num_distribution.items()}
-            total_ph = sum(num_distribution.values())
-            num_distribution = {k: v / total_ph for k, v in num_distribution.items()}
-            # Dump mapping from id to phone. Used to convert NN output back to the phone it predicted
+            # print("Mean:", np_mean, "\nStd. Dev:", np_std)
             phones_to_id = {}
-            for ph in sorted(all_phones):
-                phones_to_id[ph] = (len(phones_to_id), num_distribution[ph])
+            if self.config['dump_phone_weights']:
+                # Weights are inversely proportional to number of phones encountered
+                num_distribution = {k: 1 / v for k, v in num_distribution.items()}
+                total_ph = sum(num_distribution.values())
+                num_distribution = {k: v / total_ph for k, v in num_distribution.items()}
+                # Dump mapping from id to phone. Used to convert NN output back to the phone it predicted
 
-            phones_to_id['PAD'] = (len(phones_to_id), 0)
+                for ph in sorted(all_phones):
+                    phones_to_id[ph] = (len(phones_to_id), num_distribution[ph])
+            else:
+                for ph in sorted(all_phones):
+                    phones_to_id[ph] = (len(phones_to_id))
             # Dump this mapping
             fname = self.config['dir']['dataset'] + 'phone_mapping.json'
             with open(fname, 'w') as f:
@@ -131,6 +131,7 @@ class timit_data():
 
 
 if __name__ == '__main__':
-    config_file = {'dir': {'dataset': '../datasets/TEST/'}, 'feat_dim': 38}
-    a = timit_data('TEST', config_file)
+    from read_yaml import read_yaml
+    config = read_yaml('config.yaml')
+    a = timit_metadata('TRAIN', config)
     a.gen_pickle()

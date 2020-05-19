@@ -36,7 +36,7 @@ class QValGenModel:
         self.idx = 0
         self.win_len, self.win_step = config['window_size'], config['window_step']
         # Initialise model
-        self.rnn = dl_model('test_one')
+        self.rnn = dl_model('infer')
 
         # Load mapping of phone to id
         try:

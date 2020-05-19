@@ -11,6 +11,6 @@ For training:
 For inference:
 1. Ensure that the model_configuration folder containt the pre-trained model where configuration is the following string:
 <name_of_model>\_<number_of_layers>\_<number_of_hidden_units>\_<number_of_audio_features>
-2. Run the function _test_one_ in _dl_model.py_ with argument as a list of file paths of .wav files which are to be passed through the model.
+2. Run the function _infer_ in _dl_model.py_ with argument as a list of file paths of .wav files which are to be passed through the model.
 
 Check the commented code at the very end in _dl_model.py_ for an illustration of how the results are generated.

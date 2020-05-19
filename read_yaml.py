@@ -5,10 +5,6 @@ import yaml
 def read_yaml(path='config.yaml'):
     with open(path, 'r') as stream:
         try:
-            with open(path) as fixed_stream:
-
-                z = {**yaml.load(stream), **yaml.load(fixed_stream)}
-                return z
-
+            return yaml.safe_load(stream)
         except yaml.YAMLError as exc:
-            return exc
+            print(exc)

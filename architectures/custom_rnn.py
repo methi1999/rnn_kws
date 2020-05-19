@@ -645,7 +645,7 @@ class customGRU(GRUFrame):
 
 
 class liGRUFrame(nn.Module):
-    def __init__(self, rnn_cells, bidirectional=False):
+    def __init__(self, rnn_cells, batchnorm, dropout, bidirectional):
         """
         :param rnn_cells: example: [(cell_0_f, cell_0_b), (cell_1_f, cell_1_b), ..]
                           They are LSTMCells/RNNCells/GRUCells objects
@@ -666,6 +666,16 @@ class liGRUFrame(nn.Module):
         self.rnn_cells = nn.ModuleList(nn.ModuleList(pair) for pair in rnn_cells)
         self.num_directions = 2 if bidirectional else 1
         self.num_layers = len(rnn_cells)
+
+        if dropout > 0 and self.num_layers > 1:
+            # dropout is applied to output of each layer except the last layer
+            self.dropout = nn.Dropout(dropout)
+        else:
+            self.dropout = no_dropout
+
+        if batchnorm:
+            self.bn_wh = nn.ModuleList([])  # Batch Norm
+            self.bn_wz = nn.ModuleList([])  # Batch Norm
 
     def align_sequence(self, seq, lengths, shift_right):
         """
@@ -692,8 +702,8 @@ class liGRUFrame(nn.Module):
 
     def forward(self, input, init_hidden=None):
         """
+        :param init_hidden: hidden state
         :param input: a tensor(s) of shape (seq_len, batch, input_size)
-        :param init_state: (h_0, c_0) where the size of both is (num_layers * num_directions, batch, hidden_size)
         :returns:
         - output: (seq_len, batch, num_directions * hidden_size)
         - h_n: (num_layers * num_directions, batch, hidden_size)
@@ -726,14 +736,13 @@ class liGRUFrame(nn.Module):
                 for direction in range(self.num_directions)]
 
         last_hidden_list = []
-        last_cell_list = []
 
         layer_output = input
 
         for layer_idx in range(self.num_layers):
             layer_input = layer_output
-            # if layer_idx != 0:
-            #     layer_input = self.dropout(layer_input)
+            if layer_idx != 0:
+                layer_input = self.dropout(layer_input)
 
             direction_output_list = []
 
@@ -806,27 +815,18 @@ class liGRUCell(nn.Module):
     - https://github.com/tensorflow/tensorflow/blob/r1.12/tensorflow/contrib/rnn/python/ops/rnn_cell.py#L1335
     """
 
-    def __init__(self, input_size, hidden_size, dropout=None):
+    def __init__(self, input_size, hidden_size):
         super().__init__()
 
         self.input_size = input_size
         self.hidden_size = hidden_size
 
         self.i_z = nn.Linear(input_size, hidden_size)
-        self.inp_BN = nn.BatchNorm1d(hidden_size)
+        # self.inp_BN = nn.BatchNorm1d(hidden_size)
         self.h_z = nn.Linear(hidden_size, hidden_size)
         self.i_h = nn.Linear(input_size, hidden_size)
-        self.hidden_BN = nn.BatchNorm1d(hidden_size)
+        # self.hidden_BN = nn.BatchNorm1d(hidden_size)
         self.h_h = nn.Linear(hidden_size, hidden_size)
-
-        if dropout is not None:
-            # recurrent dropout is applied
-            if isinstance(dropout, nn.Dropout):
-                self.dropout = dropout
-            elif dropout > 0:
-                self.dropout = nn.Dropout(dropout)
-            else:
-                self.dropout = no_dropout
 
     def forward(self, input, hidden_state):
         """
@@ -836,8 +836,8 @@ class liGRUCell(nn.Module):
         :returns: hidden state and cell state
         """
         # pass input through all gates
-        z = torch.sigmoid(self.inp_BN(self.i_h(input)) + self.h_z(hidden_state))
-        h_hat = torch.relu(self.hidden_BN(self.i_h(input)) + self.h_h(hidden_state))
+        z = torch.sigmoid(self.i_z(input) + self.h_z(hidden_state))
+        h_hat = torch.relu(self.i_h(input) + self.h_h(hidden_state))
 
         new_h = z * hidden_state + (1 - z) * h_hat
 
@@ -845,22 +845,20 @@ class liGRUCell(nn.Module):
 
 
 class customliGRU(liGRUFrame):
-    def __init__(self, input_size, hidden_size, num_layers, r_dropout=0.0, bidirectional=False):
-        r_dropout_layer = nn.Dropout(r_dropout)
+    def __init__(self, input_size, hidden_size, num_layers, dropout, bn, bidirectional=False):
         rnn_cells = tuple(
             tuple(
                 liGRUCell(
                     input_size if layer_idx == 0 else hidden_size * (2 if bidirectional else 1),
-                    hidden_size,
-                    dropout=r_dropout_layer)
+                    hidden_size)
                 for _ in range(2 if bidirectional else 1))
             for layer_idx in range(num_layers))
 
-        super().__init__(rnn_cells=rnn_cells, bidirectional=bidirectional)
+        super().__init__(rnn_cells=rnn_cells, dropout=dropout, batchnorm=bn, bidirectional=bidirectional)
 
 
 if __name__ == '__main__':
     input_size = 10
-    a = customliGRU(input_size, 256, 3, r_dropout=0.3, bidirectional=True)
+    a = customliGRU(input_size, 256, 3, dropout=0.3, bidirectional=True)
     b = torch.rand((3, 5, input_size))
     print(a(b))

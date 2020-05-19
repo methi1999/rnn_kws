@@ -46,7 +46,6 @@ class liGRU(generic_model):
             'num_layers']
         self.output_dim = self.num_phones + 2  # 1 for pad and 1 for blank
         self.blank_token_id = self.num_phones + 1
-        self.pad_token_id = self.num_phones
 
         self.ligru_act = nn.LeakyReLU(0.2)
         self.bidir = config['bidirectional']
@@ -155,8 +154,6 @@ class liGRU(generic_model):
             fname = config['dir']['dataset'] + 'phone_mapping.json'
             with open(fname, 'r') as f:
                 self.phone_to_id = json.load(f)
-
-            self.weights = np.array([x[1] for x in self.phone_to_id.values()])
 
             assert len(self.phone_to_id) == config['num_phones'] + 1  # 1 for pad token
 

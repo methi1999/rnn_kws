@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import datetime
-from copy import deepcopy
 import pickle
+
 from read_yaml import read_yaml
 from dataloader import timit_loader
 import utils
@@ -24,18 +24,24 @@ class dl_model():
         self.mode = mode
 
         if self.config['rnn'] == 'liGRU':
-            from ligru import liGRU as Model
+            from architectures.ligru import liGRU as Model
         elif self.config['rnn'] == 'GRU' or self.config['rnn'] == 'LSTM':
-            from rnn import RNN as Model
+            from architectures.rnn import RNN as Model
         elif self.config['rnn'] == 'TCN':
-            from tcnn import TCN as Model
+            from architectures.tcnn import TCN as Model
         elif self.config['rnn'] == 'BTCN':
-            from tcnn import bidirectional_TCN as Model
+            from architectures.tcnn import bidirectional_TCN as Model
         elif 'custom' in self.config['rnn']:
-            from rnn import customRNN as Model
+            from architectures.rnn import customRNN as Model
         else:
+            Model = None
             print("Model import failed")
             exit(0)
+
+        if 'custom' in self.config['rnn']:
+            self.using_custom = True
+        else:
+            self.using_custom = False
 
         # Architecture name decides prefix for storing models and plots
         feature_dim = self.config['n_fbank'] + self.config['n_mfcc']
@@ -43,23 +49,17 @@ class dl_model():
             [self.config['rnn'], str(self.config['num_layers']), str(self.config['hidden_dim']), str(feature_dim)])
 
         print("Architecture:", self.arch_name)
-        # Change paths for storing models
-        self.config['dir']['models'] = self.config['dir']['models'].split('/')[0] + '_' + self.arch_name + '/'
-        self.config['dir']['plots'] = self.config['dir']['plots'].split('/')[0] + '_' + self.arch_name + '/'
 
         # Make folders if DNE
-        if not os.path.exists(self.config['dir']['models']):
-            os.mkdir(self.config['dir']['models'])
-        if not os.path.exists(self.config['dir']['plots']):
-            os.mkdir(self.config['dir']['plots'])
-        if not os.path.exists(self.config['dir']['pickle']):
-            os.mkdir(self.config['dir']['pickle'])
-
-        self.cuda = (self.config['cuda'] and torch.cuda.is_available())
+        utils.make_folder_if_dne(self.config['dir']['models'])
+        utils.make_folder_if_dne(os.path.join(self.config['dir']['models'], self.arch_name))
+        utils.make_folder_if_dne(self.config['dir']['plots'])
+        utils.make_folder_if_dne(os.path.join(self.config['dir']['plots'], self.arch_name))
+        utils.make_folder_if_dne(self.config['dir']['pickle'])
+        utils.make_folder_if_dne(os.path.join(self.config['dir']['pickle'], self.arch_name))
 
         # load/initialise metrics to be stored and load model
-        if mode == 'train' or mode == 'test':
-
+        if mode == 'train':
             self.plots_dir = self.config['dir']['plots']
             # store hyperparameters
             self.total_epochs = self.config['train']['epochs']
@@ -69,35 +69,35 @@ class dl_model():
             self.save_every = self.config['train']['save_every']
             self.plot_every = self.config['train']['plot_every']
 
-            # declare model
-
             # dataloader which returns batches of data
             self.train_loader = timit_loader('train', self.config)
             self.test_loader = timit_loader('test', self.config)
+            # declare model
             self.model = Model(self.config, mode)
 
             self.start_epoch = 1
             self.edit_dist = []
             self.train_losses, self.test_losses = [], []
-
+        elif mode == 'test':
+            self.test_loader = timit_loader('test', self.config)
+            # declare model
+            self.model = Model(self.config, mode)
         else:
-
+            # infer
             self.model = Model(self.config, mode)
 
+        self.cuda = (self.config['use_cuda'] and torch.cuda.is_available())
         if self.cuda:
             self.model.cuda()
 
         # resume training from some stored model
         if self.mode == 'train' and self.config['train']['resume']:
-            self.start_epoch, self.train_losses, self.test_losses, self.edit_dist = self.model.load_model(mode,
-                                                                                                          self.model.rnn_name,
-                                                                                                          self.model.num_layers,
-                                                                                                          self.model.hidden_dim)
+            self.start_epoch, self.train_losses, self.test_losses, self.edit_dist = self.model.load_model(mode, self.arch_name)
             self.start_epoch += 1
 
         # load best model for testing/feature extraction
-        elif self.mode == 'test' or mode == 'test_one':
-            self.model.load_model(mode, self.config['rnn'], self.model.num_layers, self.model.hidden_dim)
+        elif self.mode == 'test' or mode == 'infer':
+            self.model.load_model(mode, self.arch_name)
 
         # Replacement phones
         self.replacement = utils.replacement_dict()
@@ -118,25 +118,22 @@ class dl_model():
 
         for epoch in range(self.start_epoch, self.total_epochs + 1):
 
-            dropout_mask_reset = [True] * (self.model.num_layers * (1 + self.config['bidirectional']))
+            if self.using_custom:
+                dropout_mask_reset = [True] * (self.model.num_layers * (1 + self.config['bidirectional']))
+            else:
+                dropout_mask_reset = None
 
             try:
-
                 print("Epoch:", str(epoch))
                 epoch_loss = 0.0
                 # i used for monitoring batch and printing loss, etc.
                 i = 0
-
                 while True:
-
                     i += 1
 
                     # Get batch of feature vectors, labels and lengths along with status (when to end epoch)
                     inputs, labels, input_lens, label_lens, status = self.train_loader.return_batch()
                     # print(input_lens, label_lens)
-                    inputs, labels, = torch.from_numpy(np.array(inputs)).float(), torch.from_numpy(np.array(labels)).long()
-                    input_lens, label_lens = torch.from_numpy(np.array(input_lens)).long(), torch.from_numpy(
-                        np.array(label_lens)).long()
 
                     if self.cuda:
                         inputs = inputs.cuda()
@@ -146,12 +143,18 @@ class dl_model():
 
                     # zero the parameter gradients
                     self.model.optimizer.zero_grad()
-                    # forward + backward + optimize
-                    outputs = self.model(inputs, input_lens, dropout_mask_reset)
-                    dropout_mask_reset = [False] * (self.model.num_layers * (1 + self.config['bidirectional']))
-                    loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
-                    loss.backward()
 
+                    # forward
+                    if self.using_custom:
+                        outputs = self.model(inputs, input_lens, dropout_mask_reset)
+                        dropout_mask_reset = [False] * (self.model.num_layers * (1 + self.config['bidirectional']))
+                    else:
+                        outputs = self.model(inputs, input_lens)
+
+                    # calculate loss
+                    loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
+                    # backward
+                    loss.backward()
                     # clip gradient
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['grad_clip'])
                     self.model.optimizer.step()
@@ -169,7 +172,6 @@ class dl_model():
                     # test model periodically
                     if i in test_range:
                         self.test(epoch)
-                        self.model.train()
 
                     # Reached end of dataset
                     if status == 1:
@@ -183,14 +185,12 @@ class dl_model():
                 # save model
                 if epoch % self.save_every == 0:
                     self.model.save_model(False, epoch, self.train_losses, self.test_losses, self.edit_dist,
-                                          self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
+                                          self.arch_name)
 
                 if epoch % 5 == 0 and epoch < self.test_every:
                     self.test(epoch)
-                    self.model.train()
                 elif epoch % self.test_every == 0:
                     self.test(epoch)
-                    self.model.train()
                 # plot loss and accuracy
                 if epoch % self.plot_every == 0:
                     self.plot_loss_acc(epoch)
@@ -198,9 +198,8 @@ class dl_model():
             except KeyboardInterrupt:
                 print("Saving model before quitting")
                 self.model.save_model(False, epoch-1, self.train_losses, self.test_losses, self.edit_dist,
-                                      self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
+                                      self.arch_name)
                 exit(0)
-
 
     # test model
     def test(self, epoch=None):
@@ -209,7 +208,7 @@ class dl_model():
         # edit distance of batch
         edit_dist_batch = 0
         # number of sequences
-        total_seq = 0
+        total_phones = 0
         # decode type
         decode_type = self.config['decode_type']
         # operations dictionary for calculating probabilities
@@ -223,21 +222,20 @@ class dl_model():
         print('Total batches:', len(self.test_loader))
         test_loss = 0
 
-        k = 0
+        num_sequences = 0
         # to_dump_probs, to_dump_labels = [], []
 
         with torch.no_grad():
 
-            dropout_mask_reset = [True] * (self.model.num_layers * (1 + self.config['bidirectional']))
+            if self.using_custom:
+                dropout_mask_reset = [True] * (self.model.num_layers * (1 + self.config['bidirectional']))
+            else:
+                dropout_mask_reset = None
 
             while True:
 
                 # retrieve batch from dataloader
                 inputs, labels, input_lens, label_lens, status = self.test_loader.return_batch()
-                # convert to tensors
-                inputs, labels, input_lens, label_lens = torch.from_numpy(np.array(inputs)).float(), torch.from_numpy(
-                    np.array(labels)).long(), torch.from_numpy(np.array(input_lens)).long(), torch.from_numpy(
-                    np.array(label_lens)).long()
 
                 if self.cuda:
                     inputs = inputs.cuda()
@@ -248,18 +246,23 @@ class dl_model():
                 # zero the parameter gradients
                 self.model.optimizer.zero_grad()
 
-                # forward + backward + optimize
-                outputs = self.model(inputs, input_lens, dropout_mask_reset)
-                dropout_mask_reset = [False] * (self.model.num_layers * (1 + self.config['bidirectional']))
+                # forward
+                if self.using_custom:
+                    outputs = self.model(inputs, input_lens, dropout_mask_reset)
+                    dropout_mask_reset = [False] * (self.model.num_layers * (1 + self.config['bidirectional']))
+                else:
+                    outputs = self.model(inputs, input_lens)
+
+                # calculate loss
                 loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
                 test_loss += loss.item()
 
                 outputs = outputs.cpu().numpy()
                 labels = labels.cpu().numpy()
 
-                k += outputs.shape[0]
+                num_sequences += outputs.shape[0]
 
-                # calculated edit distance between ground truth and predicted sequence
+                # calculate edit distance between ground truth and predicted sequence
                 for i in range(outputs.shape[0]):
                     # predict by argmax
                     if decode_type == 'max':
@@ -267,11 +270,11 @@ class dl_model():
                         argmaxed = np.argmax(outputs, axis=2)
                         seq = list(argmaxed[i][:input_lens[i]])
                         # collapse neighbouring and remove blank token
-                        ctc_out = utils.ctc_collapse(seq, self.model.blank_token_id)
+                        output_seq = utils.collapse_frames(seq, self.model.blank_token_id)
                     else:
                         # predict by CTC
                         outputs = utils.softmax(outputs)
-                        ctc_out = decode(outputs[i, :input_lens[i], :], 1, self.model.blank_token_id)[0][0]
+                        output_seq = decode(outputs[i, :input_lens[i], :], 1, self.model.blank_token_id)[0][0]
 
                     # ground truth
                     gr_truth = list(labels[i][:label_lens[i]])
@@ -280,31 +283,31 @@ class dl_model():
                     # to_dump_labels.append(labels[i][:label_lens[i]])
 
                     # calculated edit distance and required operations
-                    dist, opr = edit_distance(gr_truth, ctc_out)
+                    dist, opr = utils.edit_distance(gr_truth, output_seq)
 
                     # increment number of phones
-                    total_seq += len(gr_truth)
+                    total_phones += len(gr_truth)
 
                     # update number of operations
                     for op_type, ids in opr.items():
                         if op_type == 'substitutions':
                             for orig, replace in ids:
                                 op_dict[orig]['substitutions'][replace] += 1
-                                op_dict[idx]['total'] += 1
                         else:
                             for idx in ids:
                                 op_dict[idx][op_type] += 1
-                                op_dict[idx]['total'] += 1
+                        op_dict[idx]['total'] += 1
+
                     edit_dist_batch += dist
 
                 if status == 1:
                     break
 
-                print("Done with:", k, '/', self.test_loader.num_egs)
+                print("Done with:", num_sequences, '/', self.test_loader.num_egs)
 
         # Average out the losses and edit distance
         test_loss /= len(self.test_loader)
-        edit_dist_batch /= total_seq
+        edit_dist_batch /= total_phones
 
         print("Edit distance - %.4f %% , Loss: %.7f" % (edit_dist_batch * 100, test_loss))
 
@@ -320,32 +323,33 @@ class dl_model():
         if test_loss == min([x[0] for x in self.test_losses]) and self.mode == 'train':
             print("Best new model found!")
             self.model.save_model(True, epoch, self.train_losses, self.test_losses, self.edit_dist,
-                                  self.model.rnn_name, self.model.num_layers, self.model.hidden_dim)
+                                  self.arch_name)
             # Calculate the probabilities of insertion, deletion and substitution
             for ph, data in op_dict.items():
-                prob_insert[ph] = data['insertions'] / data['total']
-                prob_del[ph] = data['deletions'] / data['total']
-                prob_substi[ph] = data['substitutions'] / data['total']
+                prob_insert[ph] = data['insertions'] / data['total'] if data['total'] else 0
+                prob_del[ph] = data['deletions'] / data['total'] if data['total'] else 0
+                prob_substi[ph] = data['substitutions'] / data['total'] if data['total'] else 0
 
-                # Dump best probability
-                prob_dump_path = self.config['dir']['pickle'] + self.arch_name + '_probs.pkl'
-                with open(prob_dump_path, 'wb') as f:
-                    pickle.dump((prob_insert, prob_del, prob_substi), f)
-                    print("Dumped probabilities")
+            # Dump best probability
+            prob_dump_path = os.path.join(self.config['dir']['pickle'], self.arch_name, 'probs.pkl')
+            with open(prob_dump_path, 'wb') as f:
+                pickle.dump((prob_insert, prob_del, prob_substi), f)
+                print("Dumped probabilities")
 
         if self.mode == 'train':
             # Dump probabilities
-            prob_dump_path = self.config['dir']['pickle'] + self.arch_name + '_probs_'+ str(epoch) + '.pkl'
+            prob_dump_path = os.path.join(self.config['dir']['pickle'], self.arch_name, str(epoch)+'_probs.pkl')
             with open(prob_dump_path, 'wb') as f:
                 pickle.dump((prob_insert, prob_del, prob_substi), f)
                 print("Dumped probabilities")
 
         # with open('test_res.pkl', 'wb') as f:
         #     pickle.dump((to_dump_probs, to_dump_labels), f)
+        self.model.train()
 
         return edit_dist_batch
 
-    def test_one(self, file_paths):
+    def infer(self, file_paths):
         """
         Called during feature extraction
         :param file_paths: list of file paths to input .wav file to be tested
@@ -357,7 +361,7 @@ class dl_model():
             feat = utils.read_wav(file_path, winlen=self.config['window_size'], winstep=self.config['window_step'],
                                   fbank_filt=self.config['n_fbank'], mfcc_filt=self.config['n_mfcc'])
             tsteps, hidden_dim = feat.shape
-            # calculate log mel filterbank energies for complete file and reshape so that it can be passed through model
+            # compute feature vector for complete file and reshape so that it can be passed through model
             features.append((feat, file_path))
             lens.append(tsteps)
 
@@ -381,9 +385,7 @@ class dl_model():
                 output = utils.softmax(output)
                 final.append((output, path))
 
-        id_to_phone = {v[0]: k for k, v in self.model.phone_to_id.items()}
-
-        return final, self.model.phone_to_id, id_to_phone
+        return final, self.model.phone_to_id
 
     # Test for each wav file in the folder and also compares with ground truth if .PHN file exists
     def test_folder(self, test_folder):
@@ -425,7 +427,7 @@ class dl_model():
                 # Take argmax to generate final string
                 argmaxed = np.argmax(outputs, axis=1)
                 # collapse according to CTC rules
-                final_str = utils.ctc_collapse(argmaxed, self.model.blank_token_id)
+                final_str = utils.collapse_frames(argmaxed, self.model.blank_token_id)
                 ans = [id_to_phone[a] for a in final_str]
                 # Generate dumpable format of phone, start time and end time
                 print("Predicted:", ans)
@@ -434,8 +436,8 @@ class dl_model():
 
             # If .PHN file exists, report edit distance
             if os.path.exists(phone_path):
-                truth = read_phones(phone_path)
-                edit_dist, ops = edit_distance(truth, ans)
+                truth = utils.read_PHN_file(phone_path)
+                edit_dist, ops = utils.edit_distance(truth, ans)
                 print("Ground Truth:", truth, '\nEdit dsitance:', edit_dist)
 
                 with open(dump_path, 'w') as f:
@@ -478,83 +480,10 @@ class dl_model():
         plt.legend()
         plt.title(self.arch_name)
 
-        filename = self.plots_dir + 'plot_' + self.arch_name + '_' + str(epoch) + '.png'
+        filename = os.path.join(self.plots_dir, self.arch_name, 'plot_' + str(epoch) + '.png')
         plt.savefig(filename)
 
         print("Saved plots")
-
-
-def edit_distance(s1, s2):
-    """
-    Score for converting s1 into s2. Both s1 and s2 is a vector of phone IDs and not phones
-    :param s1: string 1
-    :param s2: string 2
-    :return: edit distance and insert, delete and substitution probabilities
-    """
-    m, n = len(s1), len(s2)
-    dp = np.zeros((m + 1, n + 1))
-
-    op_dict = {}
-
-    for i in range(m + 1):
-        op_dict[i] = {}
-        for j in range(n + 1):
-            op_dict[i][j] = {'matches': [], 'insertions': [], 'deletions': [], 'substitutions': []}
-
-    for i in range(m + 1):
-        for j in range(n + 1):
-
-            if i == 0:
-                dp[i][j] = j
-                op_dict[i][j]['insertions'] = s2[:j]
-            elif j == 0:
-                dp[i][j] = i
-                op_dict[i][j]['deletions'] = s1[:i]
-            elif s1[i - 1] == s2[j - 1]:
-                dp[i][j] = dp[i - 1][j - 1]
-                op_dict[i][j] = deepcopy(op_dict[i - 1][j - 1])
-                op_dict[i][j]['matches'].append(s1[i - 1])
-            else:
-                best = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + 1)
-                dp[i][j] = best
-
-                if best == dp[i - 1][j] + 1:
-                    op_dict[i][j] = deepcopy(op_dict[i - 1][j])
-                    op_dict[i][j]['deletions'].append(s1[i - 1])
-                elif best == dp[i][j - 1] + 1:
-                    op_dict[i][j] = deepcopy(op_dict[i][j - 1])
-                    op_dict[i][j]['insertions'].append(s2[j - 1])
-                else:
-                    op_dict[i][j] = deepcopy(op_dict[i - 1][j - 1])
-                    op_dict[i][j]['substitutions'].append((s1[i - 1], s2[j - 1]))
-
-    return dp[m][n], op_dict[m][n]
-
-
-def read_phones(phone_file_path):
-    """
-    Read .PHN file and return a compressed sequence of phones
-    :param phone_file_path: path of .PHN file
-    :param replacement: phones which are to be collapsed
-    :return: a list of (phone, start_frame, end_frame)
-    """
-    labels = []
-
-    with open(phone_file_path, 'r') as f:
-        a = f.readlines()
-
-    for phone in a:
-        s_e_i = phone[:-1].split(' ')  # start, end, phenome_name e.g. 0 5432 'aa'
-        _, _, ph = int(s_e_i[0]), int(s_e_i[1]), s_e_i[2]
-        # Collapse
-        for father, son in utils.replacement_dict().items():
-            if ph in son:
-                ph = father
-                break
-        # Append to list
-        labels.append(ph)
-
-    return labels
 
 
 if __name__ == '__main__':
@@ -569,7 +498,7 @@ if __name__ == '__main__':
     Example usage for testing model on SA1 and SA2 sentences
     
     # declare model
-    a = dl_model('test_one')
+    a = dl_model('infer')
     
     # store wav path in a list
     wav_paths, label_paths = [], []
@@ -584,7 +513,7 @@ if __name__ == '__main__':
                     label_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file[:-3]+'PHN'))
     
     # pass this list to model for inference                
-    outputs, p_to_id, id_to_p = a.test_one(wav_paths)
+    outputs, p_to_id, id_to_p = a.infer(wav_paths)
     # dump results
     with open('SA_res.pkl', 'wb') as f:
         pickle.dump((outputs, p_to_id, id_to_p), f)

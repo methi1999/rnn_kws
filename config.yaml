@@ -6,25 +6,24 @@ dir:
 
 train:
 
-  batch_size: 40
+  batch_size: 125
   
-  epochs: 1500 #total no. of epochs to train
+  epochs: 200 #total no. of epochs to train
   
   test_per_epoch: 0 #test per epoch i.e. how many times in ONE epoch
-  test_every_epoch: 15 #after how many epochs
-  print_per_epoch: 3 #print loss function how often in each epoch
-  save_every: 25 #save models after how many epochs
-  plot_every: 15 #save plots for test loss/train loss/accuracy
+  test_every_epoch: 25 #after how many epochs
+  print_per_epoch: 2 #print loss function how often in each epoch
+  save_every: 50 #save models after how many epochs
+  plot_every: 25 #save plots for test loss/train loss/accuracy
 
   resume: True #resume training from saved model
- 
-  loss_func: 'CTC' #loss function 
+
   optim: 'Adam' #optimiser to speed up training
-  lr: 0.001 #learning rate
+  lr: 0.0003 #learning rate
 
 test:
 
-  batch_size: 40
+  batch_size: 150
 
 
 n_fbank: 40 # 40 for fitlerbank energies
@@ -33,18 +32,19 @@ window_size: 0.025 #25 milliseconds
 window_step: 0.010 #10 ms
 num_phones: 39 #39 phone labels
 
-rnn: 'customGRU'
+rnn: 'GRU'
 hidden_dim: 384 # 384 for best GRU
 num_layers: 5
-dropout: 0.2
+dropout: 0.3
 r_dropout: 0.2
 grad_clip: 3
-weighted_loss: False
 std_multiplier: 5
 bidirectional: True
+batchnorm: True
 layerNorm: True
-cuda: True #whether to use NVIDIA cuda
+use_cuda: True #whether to use NVIDIA cuda
 
+dump_phone_weights: False
 decode_type: 'max' #max or CTC
 gen_template: False
 infer_mode: 'group' # group or indi

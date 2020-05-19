@@ -103,8 +103,8 @@ def choose_keywords(base_pth, chosen_keywords, num_templates, gen_template, temp
                 i += 1
 
         templates = {}
-        rnn = dl_model('test_one')
-        outputs, phone_to_id, id_to_phone = rnn.test_one(clip_paths)
+        rnn = dl_model('infer')
+        outputs, phone_to_id, id_to_phone = rnn.infer(clip_paths)
 
         for out, path in outputs:
             word = path.split('/')[-1].split('_')[0]
@@ -112,7 +112,7 @@ def choose_keywords(base_pth, chosen_keywords, num_templates, gen_template, temp
                 templates[word] = []
 
             out = np.argmax(out[0], axis=1)
-            final_seq = utils.ctc_collapse(out, blank_id)
+            final_seq = utils.collapse_frames(out, blank_id)
             final_seq = [id_to_phone[x] for x in final_seq]
             if final_seq[0] == 'pau':
                 final_seq = final_seq[1:]
@@ -269,7 +269,7 @@ class BatchTestModel:
         self.pkl_name = config['dir']['pickle'] + 'BatchTestModel_in.pkl'
         self.model_out_path = config['dir']['pickle'] + 'BatchTestModel_out.pkl'
         # Initialise model
-        self.rnn = dl_model('test_one')
+        self.rnn = dl_model('infer')
 
         # Load mapping
         try:
@@ -765,10 +765,10 @@ if __name__ == "__main__":
     # batch_test('max', 3, 3, 2, 1, 'pickle/pr_test.json', 'pickle/pr_test.pkl', 'incorrect/')
     # batch_test('max', 3, 3, 20, 1000000, 'pickle/pr_full.json', 'pickle/pr_full.pkl', 'incorrect/')
 
-    # a = dl_model('test_one')
+    # a = dl_model('infer')
     # config = read_yaml()
     # path = 'trial/SX36.wav'
-    # output, phone_to_id, id_to_phone = a.test_one([path])
+    # output, phone_to_id, id_to_phone = a.infer([path])
     # output = output[0][0][0]
     # output = np.exp(output) / np.sum(np.exp(output), axis=1)[:, None]
     # template = ['t', 'q', 'aa', 'r', 'dx', 'ih', 's', 'pau', 'ax']

@@ -1,13 +1,15 @@
 """
 Define NN architecture, forward function and loss function
 """
-import torch
+import json
+
 import numpy as np
+import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.nn.utils import weight_norm
-import json
-from generic_model import generic_model
+
+from architectures.generic_model import generic_model
 
 
 class Chomp1d(nn.Module):
@@ -63,7 +65,6 @@ class TCN(generic_model):
             'num_layers']
         self.output_dim = self.num_phones + 2  # 1 for pad and 1 for blank
         self.blank_token_id = self.num_phones + 1
-        self.pad_token_id = self.num_phones
         self.num_channels = [self.hidden_dim] * (self.num_layers - 1) + [self.output_dim]
         kernel_size, dropout = 3, 0.2
 
@@ -79,23 +80,14 @@ class TCN(generic_model):
 
         self.network = nn.Sequential(*layers)
 
-        loss, optimizer = config['train']['loss_func'], config['train']['optim']
-        loss_found, optim_found = False, False
-
         self.loss_func = torch.nn.CTCLoss(blank=self.blank_token_id, reduction='mean', zero_infinity=False)
         print("Using CTC loss")
-        loss_found = True
 
+        optimizer = config['train']['optim']
         if optimizer == 'SGD':
             self.optimizer = optim.SGD(self.parameters(), lr=config['train']['lr'], momentum=0.9)
-            optim_found = True
         elif optimizer == 'Adam':
             self.optimizer = optim.Adam(self.parameters(), lr=config['train']['lr'])
-            optim_found = True
-
-        if loss_found is False or optim_found is False:
-            print("Can't find desired loss function/optimizer")
-            exit(0)
 
         # Load mapping of phone to id
         try:
@@ -140,7 +132,6 @@ class bidirectional_TCN(generic_model):
             'num_layers']
         self.output_dim = self.num_phones + 2  # 1 for pad and 1 for blank
         self.blank_token_id = self.num_phones + 1
-        self.pad_token_id = self.num_phones
         self.num_channels = [self.hidden_dim] * self.num_layers
         kernel_size, dropout = 3, 0.2
 

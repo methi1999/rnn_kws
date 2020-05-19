@@ -373,8 +373,8 @@ def read_grtruth(filepath):
 
 if __name__ == '__main__':
     insert_prob, delete_prob, replace_prob = pickle.load(open('pickle/GRU_5_384_probs.pkl', 'rb'))
-    a = dl_model('test_one')
-    outputs, phone_to_id, id_to_phone = a.test_one(['../datasets/TIMIT/TRAIN/DR7/MJJM0/SI1251.wav'])
+    a = dl_model('infer')
+    outputs, phone_to_id, id_to_phone = a.infer(['../datasets/TIMIT/TRAIN/DR7/MJJM0/SI1251.wav'])
     outputs = outputs[0][0][0]
     outputs = np.exp(outputs)/np.sum(np.exp(outputs), axis=1)[:,None]
 
