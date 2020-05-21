@@ -1,13 +1,13 @@
 import numpy as np
-import utils
 import torch
 import os
-import json
+import pickle
+
 from read_yaml import read_yaml
 from dl_model import dl_model
-import pickle
 from hypo_search import generate_lattice, traverse_best_lattice, find_q_values
-from utils import listdir
+import utils
+from dataloader import generic_dataloader
 
 # Set the seed to replicate results
 np.random.seed(7)
@@ -16,12 +16,12 @@ np.random.seed(7)
 replacement = utils.replacement_dict()
 
 
-class QValGenModel:
+class qval_metadata:
     """
     Loads the trained LSTM model for phone prediction and runs the chosen audio files through the model
     """
 
-    def __init__(self, config, min_phones, recordings_dump_path, model_out_path):
+    def __init__(self, config, min_phones, recordings_dump_path):
         """
         :param config: config files
         :param min_phones: minimum number of instances of each phone to calculate Q value
@@ -31,7 +31,6 @@ class QValGenModel:
 
         self.config = config
         self.pkl_name = recordings_dump_path
-        self.outputs_path = model_out_path
         self.min_phones = min_phones
         self.idx = 0
         self.win_len, self.win_step = config['window_size'], config['window_step']
@@ -39,18 +38,7 @@ class QValGenModel:
         self.rnn = dl_model('infer')
 
         # Load mapping of phone to id
-        try:
-            file_name = config['dir']['dataset'] + 'phone_mapping.json'
-            with open(file_name, 'r') as f:
-                self.phone_to_id = json.load(f)
-            self.phone_to_id = {k: v[0] for k, v in self.phone_to_id.items()}  # drop weight distribution
-            print("Phones:", self.phone_to_id)
-
-            assert len(self.phone_to_id) == config['num_phones'] + 1  # 1 for pad token
-
-        except:
-            print("Can't find phone mapping")
-            exit(0)
+        self.phone_to_id = utils.load_phone_mapping(config)
 
     def gen_pickle(self):
         """
@@ -71,12 +59,12 @@ class QValGenModel:
         # final list to be returned
         to_return = []
 
-        base_pth = self.config['dir']['dataset'] + 'TEST/'
+        base_pth = self.config['dir']['dataset'] + 'TRAIN/'
 
         # keeps track of number of phones. Terminate only when all phones are above a threshold
         ph_count_dict = {}
-        for phone in self.phone_to_id.keys():
-            if phone != 'PAD':
+        for phone, ph_id in self.phone_to_id.items():
+            if ph_id < self.config['num_phones']:
                 ph_count_dict[phone] = 0
 
         # keywords chosen
@@ -85,9 +73,9 @@ class QValGenModel:
         paths = []
 
         # Iterate over entire dataset and store paths of wav files
-        for dialect in sorted(listdir(base_pth)):
+        for dialect in sorted(utils.listdir(base_pth)):
 
-            for speaker_id in sorted(listdir(os.path.join(base_pth, dialect))):
+            for speaker_id in sorted(utils.listdir(os.path.join(base_pth, dialect))):
 
                 data = sorted(os.listdir(os.path.join(base_pth, dialect, speaker_id)))
                 wav_files = [x for x in data if x.split('.')[-1] == 'wav']  # all the .wav files
@@ -123,7 +111,7 @@ class QValGenModel:
                 phones_read = f.readlines()
 
             for phone in phones_read:
-                s_e_i = phone[:-1].split(' ')  # start, end, phenome_name e.g. 0 5432 'aa'
+                s_e_i = phone[:-1].split(' ')  # start, end, phonee_name e.g. 0 5432 'aa'
                 start, end, ph = int(s_e_i[0]), int(s_e_i[1]), s_e_i[2]
 
                 # collapse into father phone
@@ -148,71 +136,27 @@ class QValGenModel:
 
         return to_return
 
-    def build_dataset(self, list_of_sent):
-        # each element in list-of_sent is a tuple (ilterbank features of full sentence, list of phones)
 
-        # Separate lists which return feature vectors, labels and lens
-        self.final_feat = []
-        self.final_labels = []
-        self.input_lens = []
-        self.label_lens = []
+class qval_dataloader(generic_dataloader):
 
-        # Keep only those which are within a range
-        lengths = np.array([len(x[0]) for x in list_of_sent])
-        avg, std = np.mean(lengths), np.std(lengths)
-        max_allowed = int(avg + std * self.config['std_multiplier'])
-        list_of_sent = [x for x in list_of_sent if len(x[0]) <= max_allowed]
-        sent_lens = [len(x[0]) for x in list_of_sent]
-        label_lens = [len(x[1]) for x in list_of_sent]
-        max_l = max(sent_lens)
-        max_label_len = max(label_lens)
-        print("Max length:", max_l, max_label_len, "; Ignored", (len(lengths) - len(sent_lens)) / len(lengths),
-              "fraction of examples")
+    def __init__(self, config_file, batch_size, min_phones, recordings_dump_path):
+        super().__init__(config_file, batch_size)
 
-        feature_dim = self.config['n_mfcc'] + self.config['n_fbank']
-        pad_id = len(self.phone_to_id) - 1
+        metadata = qval_metadata(config_file, min_phones, recordings_dump_path)
+        ptoid = utils.load_phone_mapping(config_file)
+        self.build_dataset(metadata.gen_pickle(), ptoid, bound_lengths=False)
 
-        for sentence in list_of_sent:
-            # Append 0s to feature vector to make a fixed dimensional matrix
-            current_features = np.array(sentence[0])
-            padding_l = max_l - current_features.shape[0]
-            current_features = np.append(current_features, np.zeros((padding_l, feature_dim)), axis=0)
-            # Add pad token for 0s
-            padding_l = max_label_len - len(sentence[1])
-            current_labels = [self.phone_to_id[cur_ph] for cur_ph in sentence[1]]
-            current_labels += [pad_id] * padding_l
 
-            self.final_feat.append(current_features)
-            self.final_labels.append(np.array(current_labels))
-            self.input_lens.append(len(sentence[0]))
-            self.label_lens.append(len(sentence[1]))
+class qval_model:
 
-        # Sort them according to lengths
-        zipped = list(zip(self.final_feat, self.final_labels, self.input_lens, self.label_lens))
-        zipped.sort(key=lambda triplet: triplet[2], reverse=True)
+    def __init__(self, config, qval_dump_path, dataloader):
 
-        self.final_feat, self.final_labels = [x[0] for x in zipped], [x[1] for x in zipped]
-        self.input_lens, self.label_lens = [x[2] for x in zipped], [x[3] for x in zipped]
+        self.config = config
+        self.outputs_path = qval_dump_path
+        self.rnn = dl_model('infer')
+        self.dataloader = dataloader
 
-        self.num_egs = len(self.input_lens)
-
-        self.batch_size = min(self.config['test']['batch_size'], len(self.final_feat))
-
-    def return_batch(self):
-
-        inputs = self.final_feat[self.idx:self.idx + self.batch_size]
-        labels = self.final_labels[self.idx:self.idx + self.batch_size]
-        input_lens = self.input_lens[self.idx:self.idx + self.batch_size]
-        label_lens = self.label_lens[self.idx:self.idx + self.batch_size]
-
-        self.idx += self.batch_size
-
-        # Epoch ends if self.idx >= self.num_egs and hence return 1 which is detected by dl_model
-        if self.idx >= self.num_egs:
-            self.idx = 0
-            return inputs, labels, input_lens, label_lens, 1
-        else:
-            return inputs, labels, input_lens, label_lens, 0
+        self.cuda = self.config['use_cuda'] and torch.cuda.is_available()
 
     def get_outputs(self):
         """
@@ -225,54 +169,42 @@ class QValGenModel:
                 print("Loaded database file from pickle dump")
                 return pickle.load(f)
 
-        # build dataset of sentences to be tested
-        sent = self.gen_pickle()
-        self.build_dataset(sent)
-
-        self.rnn.model.eval()
-        cuda = (self.config['cuda'] and torch.cuda.is_available())
-        # final outputs
         final_outs = []
-        cur_batch = 0
-        total_egs = len(self.final_feat)
 
         while True:
 
-            cur_batch += 1
-            print("Batch:", cur_batch, '/', (total_egs + self.batch_size + 1) // self.batch_size)
-
             # Get batch of feature vectors, labels and lengths along with status (when to end epoch)
-            inputs, labels, input_lens, label_lens, status = self.return_batch()
-            inputs, labels, input_lens, label_lens = torch.from_numpy(np.array(inputs)).float(), torch.from_numpy(
-                np.array(labels)).long(), torch.from_numpy(np.array(input_lens)).long(), torch.from_numpy(
-                np.array(label_lens)).long()
-
-            if cuda:
-                inputs = inputs.cuda()
-                input_lens = input_lens.cuda()
+            inputs, labels, input_lens, label_lens, status = self.dataloader.return_batch(self.cuda)
 
             # forward pass
             outputs = self.rnn.model(inputs, input_lens).detach().cpu().numpy()
+
             input_lens = input_lens.detach().cpu()
+            labels = labels.detach().cpu()
+            label_lens = label_lens.detach().cpu()
 
             # softmax
-            for i in range(outputs.shape[0]):
-                softmax = np.exp(outputs[i]) / np.sum(np.exp(outputs[i]), axis=1)[:, None]
-                final_outs.append((softmax, input_lens[i], labels[i], label_lens[i]))
+            softmax = utils.softmax(outputs)
+
+            for i in range(softmax.shape[0]):
+                final_outs.append((softmax[i], input_lens[i], labels[i], label_lens[i]))
 
             if status == 1:
                 break
 
         with open(self.outputs_path, 'wb') as f:
-            pickle.dump((final_outs, self.phone_to_id), f)
+            pickle.dump(final_outs, f)
             print("Dumped model output")
 
-        return final_outs, self.phone_to_id
+        return final_outs
 
 
-def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor):
+def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor, min_sub_len=4, max_sub_len=15):
     """
     Computes the q-vale for each phone averaged over a specified number of instances
+    :param max_sub_len: max length of random subsequence chosen from gr_phone for q-value calculation
+    :param min_sub_len: min length of random subsequence chosen from gr_phone for q-value calculation
+    :param prob_path: path to probability file
     :param dump_path: path to dump file
     :param min_phones: minimum number of phones to be covered
     :param dec_type: max or CTC
@@ -288,6 +220,8 @@ def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor):
             return vals
 
     config = read_yaml()
+    phone_to_id = utils.load_phone_mapping(config)
+    blank_token_id = phone_to_id['BLANK']
 
     if not os.path.exists(config['dir']['pickle']):
         os.mkdir(config['dir']['pickle'])
@@ -296,8 +230,10 @@ def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor):
     model_out_name = config['dir']['pickle'] + 'QValGenModel_out_' + str(min_phones) + '.pkl'
 
     # Instantiates the model to calculate predictions
-    a = QValGenModel(config, min_phones, database_name, model_out_name)
-    db, phone_to_id = a.get_outputs()
+    dataloader = qval_dataloader(config, config['test']['batch_size'], min_phones, database_name)
+    model = qval_model(config, model_out_name, dataloader)
+
+    db = model.get_outputs()
 
     # load probabilities vectors
     with open(prob_path, 'rb') as f:
@@ -320,31 +256,36 @@ def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor):
         delete_prob = np.where(delete_prob == 0, minimum / div, delete_prob)
 
     final_dict = {}
-    insert_prob, delete_prob, replace_prob = np.power(insert_prob, exp_factor), np.power(delete_prob, exp_factor), \
-                                             np.power(replace_prob, exp_factor)
+    insert_prob_pow, delete_prob_pow, replace_prob_pow = np.power(insert_prob, exp_factor), \
+                                                         np.power(delete_prob, exp_factor), \
+                                                         np.power(replace_prob, exp_factor)
 
     print("Probabilities:\nInsert:", insert_prob, '\nDelete:', delete_prob, '\nSubsti:', replace_prob)
 
-    # for each sentence in database, find best subsequence, align and caluclate q values
+    # for each sentence in database, find best subsequence, align and calculate q values
     for i, (output, length, gr_phone, label_lens) in enumerate(db):
         print("On output:", str(i) + "/" + str(len(db)))
         cur_out = output[:length]
         gr_phone_ids = np.array(gr_phone[:label_lens])
+        random_subsequence_len = np.random.randint(min_sub_len, max_sub_len)
+        sub_start = np.random.randint(0, len(gr_phone_ids) - random_subsequence_len)
+        random_subsequence = gr_phone_ids[sub_start:sub_start + random_subsequence_len]
 
         # Generate lattice from current predictions
-        lattices = generate_lattice(cur_out, a.rnn.model.blank_token_id, dec_type, top_n)
+        lattices = generate_lattice(cur_out, blank_token_id, dec_type, top_n)
         # Find best subsequence in lattice
-        res_substring, final_lattice = traverse_best_lattice(lattices, dec_type, gr_phone_ids,
-                                                             insert_prob, delete_prob, replace_prob)
+        res_substring, best_lat = traverse_best_lattice(lattices, dec_type, random_subsequence,
+                                                 insert_prob, delete_prob, replace_prob)
         # Calculate q values by comparing template and best match
-        q_vals = find_q_values(gr_phone_ids, res_substring[0], res_substring[1],
-                               insert_prob, delete_prob, replace_prob)
+        q_vals = find_q_values(random_subsequence, res_substring[0], res_substring[1],
+                               insert_prob_pow, delete_prob_pow, replace_prob_pow)
 
         # Add them up
         for ph_id, list_of_qvals in q_vals.items():
             if ph_id not in final_dict.keys():
                 final_dict[ph_id] = []
             final_dict[ph_id] += list_of_qvals
+
     # Average out the values
     final_dict = {k: (sum(v) / len(v), len(v)) for k, v in final_dict.items()}
 
@@ -356,4 +297,5 @@ def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor):
 
 
 if __name__ == '__main__':
-    find_batch_q('pickle/final_q_vals.pkl', 'probs.pkl', dec_type='max', min_phones=75, top_n=5)
+    find_batch_q('pickle/final_q_vals.pkl', 'pickle/GRU_5_384_79/probs.pkl',
+                 dec_type='max', min_phones=75, top_n=5, exp_factor=1)

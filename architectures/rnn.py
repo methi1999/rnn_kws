@@ -10,6 +10,7 @@ import torch.optim as optim
 
 import architectures.custom_rnn as custom_rnn
 from architectures.generic_model import generic_model
+import utils
 
 
 class RNN(generic_model):
@@ -24,7 +25,8 @@ class RNN(generic_model):
         self.hidden_dim, self.num_phones, self.num_layers = config['hidden_dim'], config['num_phones'], config[
             'num_layers']
         self.output_dim = self.num_phones + 2  # 1 for pad and 1 for blank
-        self.blank_token_id = self.num_phones + 1
+        self.phone_to_id = utils.load_phone_mapping(config)
+        self.blank_token_id = self.phone_to_id['BLANK']
 
         if config['bidirectional']:
             if self.rnn_name == 'LSTM':
@@ -51,25 +53,14 @@ class RNN(generic_model):
             # In linear network, *2 for bidirectional
             self.hidden2phone = nn.Linear(self.hidden_dim, self.output_dim)  # for pad token
 
-        optimizer = config['train']['optim']
-
         self.loss_func = torch.nn.CTCLoss(blank=self.blank_token_id, reduction='mean', zero_infinity=False)
         print("Using CTC loss")
 
+        optimizer = config['train']['optim']
         if optimizer == 'SGD':
             self.optimizer = optim.SGD(self.parameters(), lr=config['train']['lr'], momentum=0.9)
         elif optimizer == 'Adam':
             self.optimizer = optim.Adam(self.parameters(), lr=config['train']['lr'])
-
-        # Load mapping of phone to id
-        try:
-            fname = config['dir']['dataset'] + 'phone_mapping.json'
-            with open(fname, 'r') as f:
-                self.phone_to_id = json.load(f)
-            assert len(self.phone_to_id) == config['num_phones']
-        except:
-            print("Can't find phone mapping in model")
-            exit(0)
 
     def forward(self, x, x_lens):
         """
@@ -167,17 +158,6 @@ class customRNN(generic_model):
         elif optimizer == 'Adam':
             self.optimizer = optim.Adam(self.parameters(), lr=config['train']['lr'])
 
-        # Load mapping of phone to id
-        try:
-            fname = config['dir']['dataset'] + 'phone_mapping.json'
-            with open(fname, 'r') as f:
-                self.phone_to_id = json.load(f)
-
-            assert len(self.phone_to_id) == config['num_phones'] + 1  # 1 for pad token
-
-        except:
-            print("Can't find phone mapping")
-            exit(0)
 
     def forward(self, x, x_lens, dropout_mask_reset=None):
         """
@@ -284,18 +264,6 @@ class RNN_extra_linear(generic_model):
             self.optimizer = optim.SGD(self.parameters(), lr=config['train']['lr'], momentum=0.9)
         elif optimizer == 'Adam':
             self.optimizer = optim.Adam(self.parameters(), lr=config['train']['lr'])
-
-        # Load mapping of phone to id
-        try:
-            fname = config['dir']['dataset'] + 'phone_mapping.json'
-            with open(fname, 'r') as f:
-                self.phone_to_id = json.load(f)
-
-            assert len(self.phone_to_id) == config['num_phones'] + 1  # 1 for pad token
-
-        except:
-            print("Can't find phone mapping")
-            exit(0)
 
     def init_hidden(self):
         """

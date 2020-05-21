@@ -3,12 +3,22 @@ import scipy.io.wavfile as wav
 from copy import deepcopy
 from python_speech_features import mfcc, logfbank
 import os
-
+import json
 
 # Ignore DS_Store files found on Mac
 def listdir(pth):
     return [x for x in os.listdir(pth) if x != '.DS_Store']
 
+
+def load_phone_mapping(config):
+    try:
+        file_name = config['dir']['dataset'] + 'phone_mapping.json'
+        with open(file_name, 'r') as f:
+            return json.load(f)
+
+    except:
+        print("Can't find phone mapping")
+        exit(0)
 
 def make_folder_if_dne(path):
     if not os.path.exists(path):

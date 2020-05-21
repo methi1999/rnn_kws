@@ -114,7 +114,12 @@ class timit_metadata:
                     phones_to_id[ph] = (len(phones_to_id), num_distribution[ph])
             else:
                 for ph in sorted(all_phones):
-                    phones_to_id[ph] = (len(phones_to_id))
+                    phones_to_id[ph] = len(phones_to_id)
+
+            phones_to_id['PAD'] = len(phones_to_id)
+            phones_to_id['BLANK'] = len(phones_to_id)
+            phones_to_id['WB'] = len(phones_to_id)
+
             # Dump this mapping
             fname = self.config['dir']['dataset'] + 'phone_mapping.json'
             with open(fname, 'w') as f:

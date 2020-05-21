@@ -10,12 +10,12 @@ import datetime
 import pickle
 
 from read_yaml import read_yaml
-from dataloader import timit_loader
+from dataloader import timit_dataloader
 import utils
 from beam_search import decode
 
 
-class dl_model():
+class dl_model:
 
     def __init__(self, mode):
 
@@ -70,8 +70,8 @@ class dl_model():
             self.plot_every = self.config['train']['plot_every']
 
             # dataloader which returns batches of data
-            self.train_loader = timit_loader('train', self.config)
-            self.test_loader = timit_loader('test', self.config)
+            self.train_loader = timit_dataloader('train', self.config)
+            self.test_loader = timit_dataloader('test', self.config)
             # declare model
             self.model = Model(self.config, mode)
 
@@ -79,7 +79,7 @@ class dl_model():
             self.edit_dist = []
             self.train_losses, self.test_losses = [], []
         elif mode == 'test':
-            self.test_loader = timit_loader('test', self.config)
+            self.test_loader = timit_dataloader('test', self.config)
             # declare model
             self.model = Model(self.config, mode)
         else:
@@ -132,15 +132,8 @@ class dl_model():
                     i += 1
 
                     # Get batch of feature vectors, labels and lengths along with status (when to end epoch)
-                    inputs, labels, input_lens, label_lens, status = self.train_loader.return_batch()
+                    inputs, labels, input_lens, label_lens, status = self.train_loader.return_batch(self.cuda)
                     # print(input_lens, label_lens)
-
-                    if self.cuda:
-                        inputs = inputs.cuda()
-                        labels = labels.cuda()
-                        input_lens = input_lens.cuda()
-                        label_lens = label_lens.cuda()
-
                     # zero the parameter gradients
                     self.model.optimizer.zero_grad()
 
@@ -197,8 +190,9 @@ class dl_model():
 
             except KeyboardInterrupt:
                 print("Saving model before quitting")
-                self.model.save_model(False, epoch-1, self.train_losses, self.test_losses, self.edit_dist,
-                                      self.arch_name)
+                if epoch > 1:
+                    self.model.save_model(False, epoch-1, self.train_losses, self.test_losses, self.edit_dist,
+                                          self.arch_name)
                 exit(0)
 
     # test model
@@ -235,13 +229,7 @@ class dl_model():
             while True:
 
                 # retrieve batch from dataloader
-                inputs, labels, input_lens, label_lens, status = self.test_loader.return_batch()
-
-                if self.cuda:
-                    inputs = inputs.cuda()
-                    labels = labels.cuda()
-                    input_lens = input_lens.cuda()
-                    label_lens = label_lens.cuda()
+                inputs, labels, input_lens, label_lens, status = self.test_loader.return_batch(self.cuda)
 
                 # zero the parameter gradients
                 self.model.optimizer.zero_grad()
@@ -293,10 +281,11 @@ class dl_model():
                         if op_type == 'substitutions':
                             for orig, replace in ids:
                                 op_dict[orig]['substitutions'][replace] += 1
+                                op_dict[orig]['total'] += 1
                         else:
                             for idx in ids:
                                 op_dict[idx][op_type] += 1
-                        op_dict[idx]['total'] += 1
+                                op_dict[idx]['total'] += 1
 
                     edit_dist_batch += dist
 
@@ -334,7 +323,7 @@ class dl_model():
             prob_dump_path = os.path.join(self.config['dir']['pickle'], self.arch_name, 'probs.pkl')
             with open(prob_dump_path, 'wb') as f:
                 pickle.dump((prob_insert, prob_del, prob_substi), f)
-                print("Dumped probabilities")
+                print("Dumped best probabilities")
 
         if self.mode == 'train':
             # Dump probabilities
@@ -350,6 +339,9 @@ class dl_model():
         return edit_dist_batch
 
     def infer(self, file_paths):
+
+        self.model.eval()
+
         """
         Called during feature extraction
         :param file_paths: list of file paths to input .wav file to be tested

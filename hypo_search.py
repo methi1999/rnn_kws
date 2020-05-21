@@ -18,7 +18,7 @@ def edit_distance(s1, s2, prob_ins, prob_del, prob_replacement):
     :param prob_ins: 38x1 array of insert probabilities for each phone
     :param prob_del: 38x1 array of delete probabilities for each phone
     :param prob_replacement: matrix of size 38x38
-    :return:
+    :return: score for each element in matrix. We will mostly consider only the last dp[m][n]
     """
     m, n = len(s1), len(s2)
     prob_ins, prob_del, prob_replacement = np.array(func(prob_ins)), np.array(func(prob_del)), np.array(
@@ -244,11 +244,11 @@ def traverse_best_lattice(lattices, decode_type, target_string, insert_prob, del
                     prob += func(lattice[j][1])
                     # n since first string is target string and we compare each subsequence with complete target string
                     final_score = prob + edit_matrix[n][j - i + 1]
-                    # print('Final score (for i,j) = ({},{}) is {} + {} = {}'.format(i, j, prob, edit_matrix[n][j - i + 1],
-                    #                                                                final_score))
+                    # print('Final score (for i,j) = ({},{}) is {} + {} = {}'.format(i, j, prob, edit_matrix[n][j - i
+                    # + 1], final_score))
                     if final_score > prev_best:
                         if which_lat != 0:
-                            print("Found best in", str(which_lat+1), "lattice")
+                            print("Found best in", str(which_lat + 1), "lattice")
                         best_lat = which_lat
                         prev_best = final_score
                         best_subsequence = (cur_string[:j - i + 1], cur_prob[:j - i + 1])
@@ -376,7 +376,7 @@ if __name__ == '__main__':
     a = dl_model('infer')
     outputs, phone_to_id, id_to_phone = a.infer(['../datasets/TIMIT/TRAIN/DR7/MJJM0/SI1251.wav'])
     outputs = outputs[0][0][0]
-    outputs = np.exp(outputs)/np.sum(np.exp(outputs), axis=1)[:,None]
+    outputs = np.exp(outputs) / np.sum(np.exp(outputs), axis=1)[:, None]
 
     final_lattice = generate_lattice(outputs, a.model.blank_token_id, 'max', 3, print_final_lattice=True)
 
