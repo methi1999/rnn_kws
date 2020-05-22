@@ -6,7 +6,7 @@ dir:
 
 train:
 
-  batch_size: 125
+  batch_size: 100
   
   epochs: 200 #total no. of epochs to train
   
@@ -23,7 +23,7 @@ train:
 
 test:
 
-  batch_size: 150
+  batch_size: 100
 
 
 n_fbank: 40 # 40 for fitlerbank energies

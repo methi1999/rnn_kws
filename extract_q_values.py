@@ -132,15 +132,15 @@ class qval_metadata:
             pickle.dump(to_return, f)
             print("Dumped pickle for recordings to be tested")
 
-        print("Final chosen words:", keywords_chosen)
+        # print("Final chosen words:", keywords_chosen)
 
         return to_return
 
 
 class qval_dataloader(generic_dataloader):
 
-    def __init__(self, config_file, batch_size, min_phones, recordings_dump_path):
-        super().__init__(config_file, batch_size)
+    def __init__(self, config_file, min_phones, recordings_dump_path):
+        super().__init__(config_file)
 
         metadata = qval_metadata(config_file, min_phones, recordings_dump_path)
         ptoid = utils.load_phone_mapping(config_file)
@@ -149,12 +149,18 @@ class qval_dataloader(generic_dataloader):
 
 class qval_model:
 
-    def __init__(self, config, qval_dump_path, dataloader):
+    def __init__(self, config, qval_dump_path, dataloader, rnn_model=None):
 
         self.config = config
         self.outputs_path = qval_dump_path
-        self.rnn = dl_model('infer')
+
         self.dataloader = dataloader
+
+        if rnn_model is None:
+            self.rnn_model = dl_model('infer')
+        else:
+            self.rnn_model = rnn_model
+
 
         self.cuda = self.config['use_cuda'] and torch.cuda.is_available()
 
@@ -177,7 +183,7 @@ class qval_model:
             inputs, labels, input_lens, label_lens, status = self.dataloader.return_batch(self.cuda)
 
             # forward pass
-            outputs = self.rnn.model(inputs, input_lens).detach().cpu().numpy()
+            outputs = self.rnn_model.model(inputs, input_lens).detach().cpu().numpy()
 
             input_lens = input_lens.detach().cpu()
             labels = labels.detach().cpu()
@@ -199,9 +205,11 @@ class qval_model:
         return final_outs
 
 
-def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor, min_sub_len=4, max_sub_len=15):
+def find_batch_q(dump_path, prob_path, dec_type, top_n, exp_factor, rnn_model=None,
+                 min_phones=200, min_sub_len=4, max_sub_len=15):
     """
     Computes the q-vale for each phone averaged over a specified number of instances
+    :param rnn_model: dl_model object handle
     :param max_sub_len: max length of random subsequence chosen from gr_phone for q-value calculation
     :param min_sub_len: min length of random subsequence chosen from gr_phone for q-value calculation
     :param prob_path: path to probability file
@@ -223,15 +231,18 @@ def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor, 
     phone_to_id = utils.load_phone_mapping(config)
     blank_token_id = phone_to_id['BLANK']
 
+    if rnn_model is None:
+        rnn_model = dl_model('infer')
+
     if not os.path.exists(config['dir']['pickle']):
         os.mkdir(config['dir']['pickle'])
 
-    database_name = config['dir']['pickle'] + 'QValGenModel_in_' + str(min_phones) + '.pkl'
-    model_out_name = config['dir']['pickle'] + 'QValGenModel_out_' + str(min_phones) + '.pkl'
+    database_name = os.path.join(config['dir']['pickle'], rnn_model.arch_name, 'QValGenModel_in_' + str(min_phones) + '.pkl')
+    model_out_name = os.path.join(config['dir']['pickle'], rnn_model.arch_name, 'QValGenModel_out_' + str(min_phones) + '.pkl')
 
     # Instantiates the model to calculate predictions
-    dataloader = qval_dataloader(config, config['test']['batch_size'], min_phones, database_name)
-    model = qval_model(config, model_out_name, dataloader)
+    dataloader = qval_dataloader(config, min_phones, database_name)
+    model = qval_model(config, model_out_name, dataloader, rnn_model)
 
     db = model.get_outputs()
 
@@ -264,17 +275,17 @@ def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor, 
 
     # for each sentence in database, find best subsequence, align and calculate q values
     for i, (output, length, gr_phone, label_lens) in enumerate(db):
-        print("On output:", str(i) + "/" + str(len(db)))
+        # print("On output:", str(i) + "/" + str(len(db)))
         cur_out = output[:length]
         gr_phone_ids = np.array(gr_phone[:label_lens])
-        random_subsequence_len = np.random.randint(min_sub_len, max_sub_len)
+        random_subsequence_len = min(np.random.randint(min_sub_len, max_sub_len), len(gr_phone_ids)-1)
         sub_start = np.random.randint(0, len(gr_phone_ids) - random_subsequence_len)
         random_subsequence = gr_phone_ids[sub_start:sub_start + random_subsequence_len]
 
         # Generate lattice from current predictions
         lattices = generate_lattice(cur_out, blank_token_id, dec_type, top_n)
         # Find best subsequence in lattice
-        res_substring, best_lat = traverse_best_lattice(lattices, dec_type, random_subsequence,
+        res_substring, _ = traverse_best_lattice(lattices, dec_type, random_subsequence,
                                                  insert_prob, delete_prob, replace_prob)
         # Calculate q values by comparing template and best match
         q_vals = find_q_values(random_subsequence, res_substring[0], res_substring[1],
@@ -298,4 +309,4 @@ def find_batch_q(dump_path, prob_path, min_phones, dec_type, top_n, exp_factor, 
 
 if __name__ == '__main__':
     find_batch_q('pickle/final_q_vals.pkl', 'pickle/GRU_5_384_79/probs.pkl',
-                 dec_type='max', min_phones=75, top_n=5, exp_factor=1)
+                 dec_type='max', min_phones=500, top_n=5, exp_factor=1)

@@ -11,11 +11,13 @@ class generic_dataloader:
     so that it can be passed to the LSTM model
     """
 
-    def __init__(self, config_file, batch_size):
+    def __init__(self, config_file, batch_size=None):
 
         self.config = config_file
-
-        self.batch_size = batch_size
+        if batch_size is None:
+            self.batch_size = config_file['test']['batch_size']
+        else:
+            self.batch_size = batch_size
         self.idx = 0
 
     def build_dataset(self, list_of_sent, phone_to_id, bound_lengths=True):
@@ -95,7 +97,7 @@ class generic_dataloader:
 class timit_dataloader(generic_dataloader):
 
     def __init__(self, type_, config_file):
-        super().__init__(config_file, config_file['test']['batch_size'])
+        super().__init__(config_file)
 
         from metadata import timit_metadata
         metadata = timit_metadata(type_.upper(), config_file)
