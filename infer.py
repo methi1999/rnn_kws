@@ -44,7 +44,7 @@ def word_distribution(base_pth):
     print(sorted(words.items(), key=lambda x: x[1], reverse=True))
 
 
-def choose_keywords(kw_base_path, chosen_keywords, num_templates, gen_template, blank_id=None, template_save_loc=None):
+def choose_keywords(kw_base_pth, chosen_keywords, num_templates, gen_template, blank_id=None, template_save_loc=None):
     """
     Choose keywords from TIMIT TEST according to the minimum number of templates required
     :param blank_id: blank_id index
@@ -120,10 +120,10 @@ def choose_keywords(kw_base_path, chosen_keywords, num_templates, gen_template, 
         print("Extracting templates from TIMIT")
         keywords = {}
 
-        if isinstance(kw_base_path, str):
-            kw_base_pth = [kw_base_path]
+        if isinstance(kw_base_pth, str):
+            kw_base_pth = [kw_base_pth]
 
-        for base_pth in kw_base_path:
+        for base_pth in kw_base_pth:
 
             for dialect in sorted(utils.listdir(base_pth)):
 
@@ -355,7 +355,6 @@ class test_dataloader:
         list_of_sent = [x for x in list_of_sent if len(x[0]) <= max_allowed]
 
         sent_lens = [len(x[0]) for x in list_of_sent]
-        label_lens = [len(x[1]) for x in list_of_sent]
         max_l = max(sent_lens)
 
         feature_dim = self.config['n_mfcc'] + self.config['n_fbank']
@@ -462,8 +461,7 @@ class test_model:
         return final_outs
 
 
-def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_name, results_dump_path, wrong_pred_path,
-               wrong_info_num, exp_factor=1):
+def batch_test(config, dec_type, top_n, num_templates, num_compares, num_none, results_dump_path, exp_factor=1):
     """
     Master function which carries out actual testing
     :param dec_type: max or CTC
@@ -477,7 +475,6 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_n
     :param exp_factor: weight assigned to probability score
     """
 
-    config = read_yaml()
     # keywords = ['academic', 'reflect', 'equipment', 'program', 'rarely', 'national', 'social',
     #             'movies', 'greasy', 'water']
     # keywords = [
@@ -486,11 +483,11 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_n
     #     'national', 'social', 'water', 'carry', 'time', 'before', 'always', 'often', 'people', 'money',
     #     'potatoes', 'children']
     # keywords = ['oily', 'people', 'before', 'living', 'water', 'children']
-    keywords = ['like', 'carry', 'will', 'potatoes', 'before', 'government', 'economic', 'overalls', 'through', 'money', 'children']
+    keywords = ['like', 'carry', 'will', 'potatoes', 'before', 'government', 'economic', 'overalls', 'through', 'money',
+                'children']
 
     test_case_name = 'test_cases_' + str(num_templates) + '_' + str(num_compares) + '_' + str(num_none) + '.pkl'
     pkl_name = os.path.join(config['dir']['pickle'], rnn_model.arch_name, test_case_name)
-    pr_dump_path = os.path.join(config['dir']['pickle'], rnn_model.arch_name, pr_dump_name)
     results_dump_path = os.path.join(config['dir']['pickle'], rnn_model.arch_name, results_dump_path)
 
     # generate cases to be tested on
@@ -501,7 +498,7 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_n
 
     if os.path.exists(results_dump_path):
         with open(results_dump_path, 'rb') as f:
-            final_results = pickle.load(f)
+            return pickle.load(f)
     else:
 
         a = test_model(config, cases)
@@ -527,7 +524,10 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_n
         # iterate over every clip and compare it with every template one-by-one
         # note that gr_phone_entire_clip is NOT USED
         for i, (output, length, gr_phone_entire_clip, word_in_clip, wav_path) in enumerate(db):
-            # print("On output:", str(i) + "/" + str(len(db)))
+
+            if i % (len(db) // 10) == 0:
+                print("On output:", str(i) + "/" + str(len(db)))
+
             cur_out = output[:length]
 
             # generate lattice from current predictions
@@ -554,9 +554,15 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_n
                     # node probabilities of best lattice
                     substring_phones = [id_to_phone[x] for x in pred_phones]
                     final_lattice = [id_to_phone[x[0]] for x in final_lattice]
+
+                    insert_prob_pow, delete_prob_pow, replace_prob_pow = np.power(insert_prob, exp_factor), \
+                                                                         np.power(delete_prob, exp_factor), \
+                                                                         np.power(replace_prob, exp_factor)
+
                     # calculate q values
-                    q_vals = find_q_values(template_phone_ids, pred_phones, node_prob, insert_prob, delete_prob,
-                                           replace_prob)
+                    q_vals = find_q_values(template_phone_ids, pred_phones, node_prob,
+                                           insert_prob_pow, delete_prob_pow, replace_prob_pow)
+
                     metadata = (wav_path, word_in_clip, template_word, gr_phone_entire_clip, final_lattice,
                                 substring_phones, template_phones)
                     final_results[template_word][i]['metadata'].append(metadata)
@@ -603,26 +609,30 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_n
             pickle.dump(final_results, f)
             print("Dumped final results of testing")
 
+        return final_results
+
         # with open(cnn_dump_path, 'wb') as f:
         #     pickle.dump((out_for_cnn, cases), f)
         #     print("Dumped outputs for CNN training")
 
+
+def calculate_p_r(config, final_results, pr_dump_name, wrong_pred_path, wrong_num):
     # grid search over parameter C
-    if config['infer_mode'] == 'group':
+
+    pr_dump_path = os.path.join(config['dir']['pickle'], rnn_model.arch_name, pr_dump_name)
+
+    infer_mode = config['infer_mode']
+    if infer_mode == 'group':
         cvals = list(np.arange(0, 5, 0.1))
-        prec_recall_dat = {}
-        for c in cvals:
-            prec_recall_dat[c] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0, 'prec_recall': 0.0}
-
-    elif config['infer_mode'] == 'indi':
+    elif infer_mode == 'indi':
         cvals = list(np.arange(0, 1, 0.05))
-        prec_recall_dat = {}
-        for c in cvals:
-            prec_recall_dat[c] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0, 'prec_recall': 0.0}
-
     else:
         print("Infer Mode not defined")
         exit(0)
+
+    prec_recall_dat = {}
+    for c in cvals:
+        prec_recall_dat[c] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0, 'prec_recall': ()}
 
     # store incorect predictions
     wrong = []
@@ -677,13 +687,16 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_n
     # store metrics in dictionary
     fscore = []
     for c, vals in prec_recall_dat.items():
-        prec = vals['tp'] / (vals['tp'] + vals['fp'])
-        recall = vals['tp'] / (vals['tp'] + vals['fn'])
-        prec_recall_dat[c]['prec_recall'] = (prec, recall, 2 * prec * recall / (prec + recall))
+        prec = vals['tp'] / (vals['tp'] + vals['fp']) if (vals['tp'] + vals['fp']) else 0
+        recall = vals['tp'] / (vals['tp'] + vals['fn']) if (vals['tp'] + vals['fn']) else 0
+        if prec == 0 or recall == 0:
+            prec_recall_dat[c]['prec_recall'] = (prec, recall, 0)
+        else:
+            prec_recall_dat[c]['prec_recall'] = (prec, recall, 2 * prec * recall / (prec + recall))
         fscore.append(2 * prec * recall / (prec + recall))
 
     # dump JSON
-    print('Max F-score for exp_factor', exp_factor, 'is', max(fscore))
+    print('Max F-score is', max(fscore))
 
     with open(pr_dump_path, 'w') as f:
         json.dump(prec_recall_dat, f, indent=4)
@@ -697,8 +710,9 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_n
 
     np.random.shuffle(wrong)
 
-    for (wav_path, word_in_clip, template_word, gr_phone_entire_clip, final_lattice, substring_phones, gr_phones) in wrong[:wrong_info_num]:
+    for data in wrong[:wrong_num]:
 
+        (wav_path, word_in_clip, template_word, gr_phone_entire_clip, final_lattice, substring_phones, gr_phones) = data
         gr_phones = list(gr_phones)
 
         if template_word not in word_name_dict:
@@ -733,28 +747,148 @@ def batch_test(dec_type, top_n, num_templates, num_compares, num_none, pr_dump_n
     return max(fscore)
 
 
-if __name__ == "__main__":
-    # word_distribution('../datasets/TIMIT/TEST/')
+def word_wise_p_r(config, final_results, testcases=None):
+
+    infer_mode = config['infer_mode']
+    keywords = list(final_results.keys())
+    keywords.remove('NONE')
+
+    if infer_mode == 'group':
+        cvals = list(np.arange(0, 5, 0.1))
+    elif infer_mode == 'indi':
+        cvals = list(np.arange(0, 1, 0.05))
+    else:
+        print("Infer Mode not defined")
+        exit(0)
+
+    prec_recall_dat = {}
+
+    for keyword in keywords:
+        prec_recall_dat[keyword] = {}
+        for c in cvals:
+            prec_recall_dat[keyword][c] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0, 'prec_recall': ()}
+
+    # if any one of the templates match, declare keyword found, else not found
+    for c in cvals:
+        for word, res in final_results.items():
+            for iteration, d in res.items():
+                egs = d['data']
+                if egs[0][0] == 'right':
+                    found = False
+
+                    if infer_mode == 'group':
+                        for _, gr, pred in egs:
+                            if pred + c >= gr:
+                                found = True
+                    elif infer_mode == 'indi':
+                        for _, ratio in egs:
+                            if ratio >= c:
+                                found = True
+                    else:
+                        print("Infer Mode not defined")
+                        exit(0)
+
+                    if found:
+                        prec_recall_dat[word][c]['tp'] += 1
+                    else:
+                        prec_recall_dat[word][c]['fn'] += 1
+
+                else:
+                    found = False
+                    if infer_mode == 'group':
+                        for _, gr, pred in egs:
+                            if pred + c >= gr:
+                                found = True
+                    elif infer_mode == 'indi':
+                        for _, ratio in egs:
+                            if ratio >= c:
+                                found = True
+                    else:
+                        print("Infer Mode not defined")
+                        exit(0)
+
+                    if found:
+                        prec_recall_dat[word][c]['fp'] += 1
+                    else:
+                        prec_recall_dat[word][c]['tn'] += 1
+
+    # store metrics in dictionary
+    best_fscores = {}
+    # print(prec_recall_dat)
+    for kw, c_dict in prec_recall_dat.items():
+        for c, vals in c_dict.items():
+            prec = vals['tp'] / (vals['tp'] + vals['fp']) if (vals['tp'] + vals['fp']) else 0
+            recall = vals['tp'] / (vals['tp'] + vals['fn']) if (vals['tp'] + vals['fn']) else 0
+            if prec == 0 or recall == 0:
+                prec_recall_dat[kw][c]['prec_recall'] = (prec, recall, 0)
+            else:
+                prec_recall_dat[kw][c]['prec_recall'] = (prec, recall, 2 * prec * recall / (prec + recall))
+
+        best_c = 0
+        best_fscore = 0
+        for c in prec_recall_dat[kw]:
+            if prec_recall_dat[kw][c]['prec_recall'][2] > best_fscore:
+                best_fscore = prec_recall_dat[kw][c]['prec_recall'][2]
+                best_c = c
+
+        best_fscores[kw] = prec_recall_dat[kw][best_c]['prec_recall']
+
+    print(best_fscores)
+
+    if testcases is not None:
+        lens = {}
+        # print(testcases)
+        for kw, data in testcases.items():
+            if kw == 'NONE':
+                continue
+            temp_sum = sum([len(x) for x in data['templates']])
+            lens[kw] = temp_sum/len(data['templates'])
+        print("Average length of keywords:", lens)
+
+        import matplotlib.pyplot as plt
+        x, y = [], []
+        for kw in keywords:
+            x.append(lens[kw])
+            y.append(best_fscores[kw][2])
+        plt.xlabel("Average length of template")
+        plt.ylabel("Best F-score")
+        plt.grid(True)
+        plt.scatter(x, y)
+        plt.show()
+
+
+
+def exp_grid_search(config):
 
     final = {}
     i = 0
     for exp in list(np.arange(0.2, 3.1, 0.1)):
         start = time.time()
         print("Starting at:", start)
-        final[exp] = batch_test('max', 5, 3, 8, 170, 'pr_' + str(i) + '.json',
-                                'final_res_' + str(i) + '.pkl', 'incorrect/', wrong_info_num=1000, exp_factor=exp)
+        results = batch_test(config, 'max', 5, 3, 8, 170, 'final_res_' + str(i) + '.pkl', exp_factor=exp)
+        final[exp] = calculate_p_r(config, results, 'pr_' + str(i) + '.json', 'incorrect/', wrong_num = 1000)
         print("Ended at:", time.time() - start)
         qvals_path = os.path.join('pickle', rnn_model.arch_name, 'final_q_vals.pkl')
         os.remove(qvals_path)
         i += 1
 
     print(max(final.values()), final)
-    with open('f.pkl', 'wb') as f:
+    with open(os.path.join('pickle', rnn_model.arch_name, 'exp_grid_search.pkl'), 'wb') as f:
         pickle.dump(final, f)
 
-    # batch_test('max', 5, 3, 8, 170, 'pr_test.json', 'final_res_test.pkl', 'incorrect/', exp_factor=1.3)
-    # batch_test('max', 5, 3, 8, 170, 'pickle/pr_test.json', 'pickle/final_res_test.pkl', 'incorrect/', 'pickle/cnn.pkl', exp_factor=1.3)
-    # batch_test('max', 3, 3, 2, 1, 'pr_test.json', 'pr_test.pkl', 'incorrect/', wrong_info_num=1000)
+
+if __name__ == "__main__":
+
+    # word_distribution('../datasets/TIMIT/TEST/')
+
+    config = read_yaml()
+    exp_grid_search(config)
+    # res = pickle.load(open('pickle/GRU_5_384_79/final_res_exp_1.pkl', 'rb'))
+    # cases = pickle.load(open('pickle/GRU_5_384_79/test_cases_3_8_170.pkl', 'rb'))
+    # word_wise_p_r(config, res, cases)
+    # results = batch_test(config, 'max', 1, 3, 8, 170, 'final_res_exp_1_lattice1.pkl', exp_factor=1)
+    # fscore = calculate_p_r(config, results, 'pr_exp1_lattic1.json', 'incorrect/', wrong_num=1000)
+    # print(fscore)
     # batch_test('max', 3, 3, 20, 1000000, 'pickle/pr_full.json', 'pickle/pr_full.pkl', 'incorrect/')
 
     # a = dl_model('infer')

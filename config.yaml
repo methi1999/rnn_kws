@@ -23,7 +23,7 @@ train:
 
 test:
 
-  batch_size: 100
+  batch_size: 50
 
 
 n_fbank: 40 # 40 for fitlerbank energies

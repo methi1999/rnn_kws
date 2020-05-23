@@ -275,7 +275,8 @@ def find_batch_q(dump_path, prob_path, dec_type, top_n, exp_factor, rnn_model=No
 
     # for each sentence in database, find best subsequence, align and calculate q values
     for i, (output, length, gr_phone, label_lens) in enumerate(db):
-        # print("On output:", str(i) + "/" + str(len(db)))
+        if i % (len(db)//10) == 0:
+            print("On output:", str(i) + "/" + str(len(db)))
         cur_out = output[:length]
         gr_phone_ids = np.array(gr_phone[:label_lens])
         random_subsequence_len = min(np.random.randint(min_sub_len, max_sub_len), len(gr_phone_ids)-1)

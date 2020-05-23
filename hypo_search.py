@@ -247,12 +247,12 @@ def traverse_best_lattice(lattices, decode_type, target_string, insert_prob, del
                     # print('Final score (for i,j) = ({},{}) is {} + {} = {}'.format(i, j, prob, edit_matrix[n][j - i
                     # + 1], final_score))
                     if final_score > prev_best:
-                        if which_lat != 0:
-                            print("Found best in", str(which_lat + 1), "lattice")
                         best_lat = which_lat
                         prev_best = final_score
                         best_subsequence = (cur_string[:j - i + 1], cur_prob[:j - i + 1])
 
+        if best_lat != 0:
+            print("Found best in", str(best_lat + 1), "lattice")
         return best_subsequence, lattices[best_lat]
 
     else:
