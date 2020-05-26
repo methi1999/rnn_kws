@@ -97,7 +97,10 @@ class generic_dataloader:
 class timit_dataloader(generic_dataloader):
 
     def __init__(self, type_, config_file):
-        super().__init__(config_file)
+        if type_ == 'train':
+            super().__init__(config_file, config_file['train']['batch_size'])
+        else:
+            super().__init__(config_file, config_file['train']['batch_size'])
 
         from metadata import timit_metadata
         metadata = timit_metadata(type_.upper(), config_file)

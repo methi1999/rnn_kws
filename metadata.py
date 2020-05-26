@@ -118,7 +118,7 @@ class timit_metadata:
 
             phones_to_id['PAD'] = len(phones_to_id)
             phones_to_id['BLANK'] = len(phones_to_id)
-            phones_to_id['WB'] = len(phones_to_id)
+            # phones_to_id['WB'] = len(phones_to_id)
 
             # Dump this mapping
             fname = self.config['dir']['dataset'] + 'phone_mapping.json'

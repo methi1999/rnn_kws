@@ -475,16 +475,16 @@ def batch_test(config, dec_type, top_n, num_templates, num_compares, num_none, r
     :param exp_factor: weight assigned to probability score
     """
 
-    # keywords = ['academic', 'reflect', 'equipment', 'program', 'rarely', 'national', 'social',
-    #             'movies', 'greasy', 'water']
+    keywords = ['academic', 'reflect', 'equipment', 'program', 'rarely', 'national', 'social',
+                'movies', 'greasy', 'water']
     # keywords = [
     #     'oily', 'people', 'before', 'living', 'potatoes', 'children', 'overalls', 'morning', 'enough', 'system',
     #     'water', 'greasy', 'suit', 'dark', 'very', 'without', 'money', 'reflect', 'program',
     #     'national', 'social', 'water', 'carry', 'time', 'before', 'always', 'often', 'people', 'money',
     #     'potatoes', 'children']
     # keywords = ['oily', 'people', 'before', 'living', 'water', 'children']
-    keywords = ['like', 'carry', 'will', 'potatoes', 'before', 'government', 'economic', 'overalls', 'through', 'money',
-                'children']
+    # keywords = ['like', 'carry', 'will', 'potatoes', 'before', 'government', 'economic', 'overalls', 'through', 'money',
+                # 'children']
 
     test_case_name = 'test_cases_' + str(num_templates) + '_' + str(num_compares) + '_' + str(num_none) + '.pkl'
     pkl_name = os.path.join(config['dir']['pickle'], rnn_model.arch_name, test_case_name)
@@ -882,13 +882,13 @@ if __name__ == "__main__":
     # word_distribution('../datasets/TIMIT/TEST/')
 
     config = read_yaml()
-    exp_grid_search(config)
+    # exp_grid_search(config)
     # res = pickle.load(open('pickle/GRU_5_384_79/final_res_exp_1.pkl', 'rb'))
     # cases = pickle.load(open('pickle/GRU_5_384_79/test_cases_3_8_170.pkl', 'rb'))
     # word_wise_p_r(config, res, cases)
-    # results = batch_test(config, 'max', 1, 3, 8, 170, 'final_res_exp_1_lattice1.pkl', exp_factor=1)
-    # fscore = calculate_p_r(config, results, 'pr_exp1_lattic1.json', 'incorrect/', wrong_num=1000)
-    # print(fscore)
+    results = batch_test(config, 'max', 5, 3, 8, 170, 'final_res_exp_1_lattice1.pkl', exp_factor=1)
+    fscore = calculate_p_r(config, results, 'pr_exp1_lattic1.json', 'incorrect/', wrong_num=1000)
+    print(fscore)
     # batch_test('max', 3, 3, 20, 1000000, 'pickle/pr_full.json', 'pickle/pr_full.pkl', 'incorrect/')
 
     # a = dl_model('infer')
