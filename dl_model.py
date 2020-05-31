@@ -502,10 +502,9 @@ if __name__ == '__main__':
             for wav_file in wav_files:
                 if wav_file in ['SA1.wav', 'SA2.wav']:
                     wav_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file))
-                    label_paths.append(os.path.join(base_pth, dialect, speaker_id, wav_file[:-3]+'PHN'))
     
     # pass this list to model for inference                
-    outputs, p_to_id, id_to_p = a.infer(wav_paths)
+    outputs, p_to_id = a.infer(wav_paths)
     # dump results
     with open('SA_res.pkl', 'wb') as f:
         pickle.dump((outputs, p_to_id, id_to_p), f)
