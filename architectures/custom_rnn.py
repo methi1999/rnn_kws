@@ -645,7 +645,7 @@ class customGRU(GRUFrame):
 
 
 class liGRUFrame(nn.Module):
-    def __init__(self, rnn_cells, batchnorm, dropout, bidirectional):
+    def __init__(self, rnn_cells, dropout, bidirectional):
         """
         :param rnn_cells: example: [(cell_0_f, cell_0_b), (cell_1_f, cell_1_b), ..]
                           They are LSTMCells/RNNCells/GRUCells objects
@@ -673,9 +673,9 @@ class liGRUFrame(nn.Module):
         else:
             self.dropout = no_dropout
 
-        if batchnorm:
-            self.bn_wh = nn.ModuleList([])  # Batch Norm
-            self.bn_wz = nn.ModuleList([])  # Batch Norm
+        # if batchnorm:
+        #     self.bn_wh = nn.ModuleList([])  # Batch Norm
+        #     self.bn_wz = nn.ModuleList([])  # Batch Norm
 
     def align_sequence(self, seq, lengths, shift_right):
         """
@@ -808,12 +808,6 @@ class liGRUFrame(nn.Module):
 
 
 class liGRUCell(nn.Module):
-    """
-    It's based on tf.contrib.rnn.LayerNormBasicLSTMCell
-    Reference:
-    - https://www.tensorflow.org/api_docs/python/tf/contrib/rnn/LayerNormBasicLSTMCell
-    - https://github.com/tensorflow/tensorflow/blob/r1.12/tensorflow/contrib/rnn/python/ops/rnn_cell.py#L1335
-    """
 
     def __init__(self, input_size, hidden_size):
         super().__init__()
@@ -845,7 +839,7 @@ class liGRUCell(nn.Module):
 
 
 class customliGRU(liGRUFrame):
-    def __init__(self, input_size, hidden_size, num_layers, dropout, bn, bidirectional=False):
+    def __init__(self, input_size, hidden_size, num_layers, dropout, bidirectional=False):
         rnn_cells = tuple(
             tuple(
                 liGRUCell(
@@ -854,7 +848,7 @@ class customliGRU(liGRUFrame):
                 for _ in range(2 if bidirectional else 1))
             for layer_idx in range(num_layers))
 
-        super().__init__(rnn_cells=rnn_cells, dropout=dropout, batchnorm=bn, bidirectional=bidirectional)
+        super().__init__(rnn_cells=rnn_cells, dropout=dropout, bidirectional=bidirectional)
 
 
 if __name__ == '__main__':

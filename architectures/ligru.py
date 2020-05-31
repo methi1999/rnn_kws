@@ -21,6 +21,30 @@ def flip(x, dim):
     return x.view(xsize)
 
 
+def align_sequence(seq, lengths, shift_right):
+    """
+    shifts sequence so that for bidirectional case, the zeros are not considered after reversing the input
+    :param shift_right: whether to shift the tensor values to the right
+    :param lengths: [length by which we want to shift each example]. Different for each example in batch
+    :param seq: (seq_len, batch_size, *)
+    :return rotated version of tensor along given dimension
+    """
+    multiplier = 1 if shift_right else -1
+    # split along batch dimension into individual examples
+    example_seqs = torch.split(seq, 1, dim=1)
+    max_length = max(lengths)
+    # final sequences are stored in this
+    shifted_seqs = []
+    for i in range(len(lengths)):
+        example_seq, length = example_seqs[i], lengths[i]
+        # value is -ve or +ve depending on shift right or left
+        shift = ((max_length - length) * multiplier).item()
+        # shift them
+        shifted_seqs.append(example_seq.roll(shifts=shift, dims=0))
+    # stitch them back and return
+    return torch.cat(shifted_seqs, dim=1)
+
+
 class liGRU(generic_model):
     def __init__(self, config, to_do):
 
@@ -42,11 +66,6 @@ class liGRU(generic_model):
         self.hidden_dim_layers = [self.hidden_dim] * self.num_layers
         self.use_cuda = torch.cuda.is_available() and config['use_cuda']
 
-        if to_do == 'train':
-            self.train_flag = True
-        else:
-            self.train_flag = False
-
         self.use_batchnorm = True
         self.use_batchnorm_inp = True
 
@@ -66,7 +85,10 @@ class liGRU(generic_model):
 
         # Input batch normalization
         if self.use_batchnorm_inp:
-            self.bn0 = nn.BatchNorm1d(self.input_dim, momentum=0.05)
+            if self.is_bidirectional:
+                self.bn0 = nn.BatchNorm1d(2*self.input_dim, momentum=0.05)
+            else:
+                self.bn0 = nn.BatchNorm1d(self.input_dim, momentum=0.05)
 
         current_input = self.input_dim
 
@@ -82,8 +104,12 @@ class liGRU(generic_model):
                 add_bias = False
 
             # Feed-forward connections
-            self.wh.append(nn.Linear(current_input, self.hidden_dim_layers[i], bias=add_bias))
-            self.wz.append(nn.Linear(current_input, self.hidden_dim_layers[i], bias=add_bias))
+            if i == 0 and self.is_bidirectional:
+                self.wh.append(nn.Linear(2*current_input, self.hidden_dim_layers[i], bias=add_bias))
+                self.wz.append(nn.Linear(2*current_input, self.hidden_dim_layers[i], bias=add_bias))
+            else:
+                self.wh.append(nn.Linear(current_input, self.hidden_dim_layers[i], bias=add_bias))
+                self.wz.append(nn.Linear(current_input, self.hidden_dim_layers[i], bias=add_bias))
 
             # Recurrent connections
             self.uh.append(nn.Linear(self.hidden_dim_layers[i], self.hidden_dim_layers[i], bias=False))
@@ -119,80 +145,140 @@ class liGRU(generic_model):
         elif optimizer == 'Adam':
             self.optimizer = optim.Adam(self.parameters(), lr=config['train']['lr'])
 
-    def forward(self, x_batch, lens):
+    def forward(self, x, lens):
 
-        final = torch.zeros((x_batch.shape[0], x_batch.shape[1], self.output_dim))
+        x = x.permute(1, 0, 2)
+        flipped = align_sequence(x, lens, shift_right=True)
+        flipped = torch.flip(flipped, [0])
+        x = torch.cat([x, flipped], 2)
 
-        for eg, x in enumerate(x_batch):
+        if self.use_batchnorm_inp:
+            x_bn = self.bn0(x.reshape(x.shape[0] * x.shape[1], x.shape[2]))
+            x = x_bn.reshape(x.shape[0], x.shape[1], x.shape[2])
 
-            x = x_batch[eg:eg+1, :lens[eg], :]
+        for i in range(self.num_layers):
 
-            if self.use_batchnorm_inp:
-                x_bn = self.bn0(x.view(x.shape[0] * x.shape[1], x.shape[2]))
-                x = x_bn.view(x.shape[0], x.shape[1], x.shape[2])
+            # Initial state and concatenation
+            if self.is_bidirectional:
+                h_init = torch.zeros(2 * x.shape[1], self.hidden_dim_layers[i])
+            else:
+                h_init = torch.zeros(x.shape[1], self.hidden_dim_layers[i])
+            print(h_init.shape)
+            # Drop mask initialization (same mask for all time steps)
+            if self.training:
+                drop_mask = torch.bernoulli(
+                    torch.Tensor(h_init.shape[0], h_init.shape[1]).fill_(1 - self.dropout_vals[i])
+                )
+            else:
+                drop_mask = torch.FloatTensor([1 - self.dropout_vals[i]])
 
-            for i in range(self.num_layers):
+            if self.use_cuda:
+                h_init = h_init.cuda()
+                drop_mask = drop_mask.cuda()
 
-                # Initial state and concatenation
-                if self.is_bidirectional:
-                    h_init = torch.zeros(2 * x.shape[1], self.hidden_dim_layers[i])
-                    x = torch.cat([x, flip(x, 0)], 1)
-                else:
-                    h_init = torch.zeros(x.shape[1], self.hidden_dim_layers[i])
+            # Feed-forward affine transformations (all steps in parallel)
+            wh_out = self.wh[i](x)
+            wz_out = self.wz[i](x)
 
-                # Drop mask initialization (same mask for all time steps)
-                if self.train_flag:
-                    drop_mask = torch.bernoulli(
-                        torch.Tensor(h_init.shape[0], h_init.shape[1]).fill_(1 - self.dropout_vals[i])
-                    )
-                else:
-                    drop_mask = torch.FloatTensor([1 - self.dropout_vals[i]])
+            # Apply batch norm if needed (all steos in parallel)
+            if self.use_batchnorm:
+                wh_out_bn = self.bn_wh[i](wh_out.view(wh_out.shape[0] * wh_out.shape[1], wh_out.shape[2]))
+                wh_out = wh_out_bn.view(wh_out.shape[0], wh_out.shape[1], wh_out.shape[2])
 
-                if self.use_cuda:
-                    h_init = h_init.cuda()
-                    drop_mask = drop_mask.cuda()
+                wz_out_bn = self.bn_wz[i](wz_out.view(wz_out.shape[0] * wz_out.shape[1], wz_out.shape[2]))
+                wz_out = wz_out_bn.view(wz_out.shape[0], wz_out.shape[1], wz_out.shape[2])
 
-                # Feed-forward affine transformations (all steps in parallel)
-                wh_out = self.wh[i](x)
-                wz_out = self.wz[i](x)
+            # Processing time steps
+            hiddens = []
+            ht = h_init
+            print(wz_out.shape, self.uz[i](ht).shape)
 
-                # Apply batch norm if needed (all steos in parallel)
-                if self.use_batchnorm:
-                    wh_out_bn = self.bn_wh[i](wh_out.view(wh_out.shape[0] * wh_out.shape[1], wh_out.shape[2]))
-                    wh_out = wh_out_bn.view(wh_out.shape[0], wh_out.shape[1], wh_out.shape[2])
+            for k in range(x.shape[0]):
+                # ligru equation
+                zt = torch.sigmoid(wz_out[k] + self.uz[i](ht))
+                at = wh_out[k] + self.uh[i](ht)
+                hcand = self.act[i](at) * drop_mask
+                ht = zt * ht + (1 - zt) * hcand
 
-                    wz_out_bn = self.bn_wz[i](wz_out.view(wz_out.shape[0] * wz_out.shape[1], wz_out.shape[2]))
-                    wz_out = wz_out_bn.view(wz_out.shape[0], wz_out.shape[1], wz_out.shape[2])
+                hiddens.append(ht)
 
-                # Processing time steps
-                hiddens = []
-                ht = h_init
+            # Stacking hidden states
+            h = torch.stack(hiddens)
+            print(h.shape)
 
-                for k in range(x.shape[0]):
+            # Bidirectional concatenations
+            if self.is_bidirectional:
+                h_f = h[:, 0: int(x.shape[1] / 2)]
+                h_b = h[:, int(x.shape[1] / 2): x.shape[1]]
+                h = torch.cat([h_f, h_b], 2)
 
-                    # ligru equation
-                    zt = torch.sigmoid(wz_out[k] + self.uz[i](ht))
-                    at = wh_out[k] + self.uh[i](ht)
-                    hcand = self.act[i](at) * drop_mask
-                    ht = zt * ht + (1 - zt) * hcand
+            # Setup x for the next hidden layer
+            x = h
 
-                    hiddens.append(ht)
+    def forward_old(self, x, lens):
 
-                # Stacking hidden states
-                h = torch.stack(hiddens)
+        if self.use_batchnorm_inp:
+            x_bn = self.bn0(x.view(x.shape[0] * x.shape[1], x.shape[2]))
+            x = x_bn.view(x.shape[0], x.shape[1], x.shape[2])
 
-                # Bidirectional concatenations
-                if self.is_bidirectional:
-                    h_f = h[:, 0: int(x.shape[1] / 2)]
-                    h_b = flip(h[:, int(x.shape[1] / 2): x.shape[1]].contiguous(), 0)
-                    h = torch.cat([h_f, h_b], 2)
+        for i in range(self.num_layers):
 
-                # Setup x for the next hidden layer
-                x = h
+            # Initial state and concatenation
+            if self.is_bidirectional:
+                h_init = torch.zeros(2 * x.shape[1], self.hidden_dim_layers[i])
+                x = torch.cat([x, flip(x, 0)], 1)
+            else:
+                h_init = torch.zeros(x.shape[1], self.hidden_dim_layers[i])
 
-            final[eg, :lens[eg], :] = self.hidden_2_phone(x)
+            # Drop mask initialization (same mask for all time steps)
+            if self.training:
+                drop_mask = torch.bernoulli(
+                    torch.Tensor(h_init.shape[0], h_init.shape[1]).fill_(1 - self.dropout_vals[i])
+                )
+            else:
+                drop_mask = torch.FloatTensor([1 - self.dropout_vals[i]])
 
-        return final
+            if self.use_cuda:
+                h_init = h_init.cuda()
+                drop_mask = drop_mask.cuda()
+
+            # Feed-forward affine transformations (all steps in parallel)
+            wh_out = self.wh[i](x)
+            wz_out = self.wz[i](x)
+
+            # Apply batch norm if needed (all steos in parallel)
+            if self.use_batchnorm:
+                wh_out_bn = self.bn_wh[i](wh_out.view(wh_out.shape[0] * wh_out.shape[1], wh_out.shape[2]))
+                wh_out = wh_out_bn.view(wh_out.shape[0], wh_out.shape[1], wh_out.shape[2])
+
+                wz_out_bn = self.bn_wz[i](wz_out.view(wz_out.shape[0] * wz_out.shape[1], wz_out.shape[2]))
+                wz_out = wz_out_bn.view(wz_out.shape[0], wz_out.shape[1], wz_out.shape[2])
+
+            # Processing time steps
+            hiddens = []
+            print(x.shape)
+            ht = h_init
+
+            for k in range(x.shape[0]):
+                # ligru equation
+                zt = torch.sigmoid(wz_out[k] + self.uz[i](ht))
+                at = wh_out[k] + self.uh[i](ht)
+                hcand = self.act[i](at) * drop_mask
+                ht = zt * ht + (1 - zt) * hcand
+
+                hiddens.append(ht)
+
+            # Stacking hidden states
+            h = torch.stack(hiddens)
+
+            # Bidirectional concatenations
+            if self.is_bidirectional:
+                h_f = h[:, 0: int(x.shape[1] / 2)]
+                h_b = flip(h[:, int(x.shape[1] / 2): x.shape[1]].contiguous(), 0)
+                h = torch.cat([h_f, h_b], 2)
+
+            # Setup x for the next hidden layer
+            x = h
 
     def calculate_loss(self, outputs, labels, input_lens, label_lens):
         """

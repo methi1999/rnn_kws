@@ -105,17 +105,18 @@ class RNN(generic_model):
 
 class customRNN(generic_model):
 
-    def __init__(self, config):
+    def __init__(self, config, mode):
 
         super(customRNN, self).__init__(config)
 
         self.rnn_name = config['rnn']
         # Store important parameters
+        self.phone_to_id = utils.load_phone_mapping(config)
         self.feat_dim = config['n_mfcc'] + config['n_fbank']
         self.hidden_dim, self.num_phones,  = config['hidden_dim'], config['num_phones']
         self.num_layers = config['num_layers']
         self.output_dim = self.num_phones + 2  # 1 for pad and 1 for blank
-        self.blank_token_id = self.num_phones + 1
+        self.blank_token_id = self.phone_to_id['BLANK']
         self.num_directions = 2 if config['bidirectional'] else 1
 
         dropout, r_dropout = config['dropout'], config['r_dropout']
@@ -130,7 +131,7 @@ class customRNN(generic_model):
                                                 layer_norm_enabled=layer_norm, r_dropout=r_dropout, bidirectional=True)
             elif self.rnn_name == 'customliGRU':
                 self.rnn = custom_rnn.customliGRU(self.feat_dim, self.hidden_dim, self.num_layers, dropout=dropout,
-                                                  bn=batch_norm, bidirectional=True)
+                                                 bidirectional=True)
 
             # In linear network, *2 for bidirectional
             self.hidden2phone = nn.Linear(self.hidden_dim * 2, self.output_dim)
@@ -143,7 +144,7 @@ class customRNN(generic_model):
                                                 layer_norm_enabled=layer_norm, r_dropout=r_dropout, bidirectional=True)
             elif self.rnn_name == 'customliGRU':
                 self.rnn = custom_rnn.customliGRU(self.feat_dim, self.hidden_dim, self.num_layers, dropout=dropout,
-                                                  bn=batch_norm, bidirectional=False)
+                                                  bidirectional=False)
 
             # In linear network, *2 for bidirectional
             self.hidden2phone = nn.Linear(self.hidden_dim, self.output_dim)  # for pad token
@@ -158,7 +159,6 @@ class customRNN(generic_model):
         elif optimizer == 'Adam':
             self.optimizer = optim.Adam(self.parameters(), lr=config['train']['lr'])
 
-
     def forward(self, x, x_lens, dropout_mask_reset=None):
         """
         Forward pass through RNN
@@ -167,8 +167,6 @@ class customRNN(generic_model):
         :param x_lens: actual lengths of each sequence < max sequence length (since padded with zeros)
         :return: tensor of shape (batch size, max sequence length, output dim)
         """
-        if dropout_mask_reset is None:
-            dropout_mask_reset = [False] * (self.num_layers * self.num_directions)
 
         batch_size, seq_len, _ = x.size()
         # Dim transformation: (batch_size, seq_len, embedding_dim) -> (batch_size, seq_len, nb_lstm_units)
@@ -178,6 +176,8 @@ class customRNN(generic_model):
         if self.config_file['rnn'] == 'customliGRU':
             X, _ = self.rnn(X)
         else:
+            if dropout_mask_reset is None:
+                dropout_mask_reset = [False] * (self.num_layers * self.num_directions)
             X, _ = self.rnn(X, dropout_mask_reset)
         # undo the packing operation
         X, _ = torch.nn.utils.rnn.pad_packed_sequence(X, batch_first=True)

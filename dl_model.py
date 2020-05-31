@@ -104,7 +104,6 @@ class dl_model:
 
     # Train the model
     def train(self):
-
         print("Starting training at t =", datetime.datetime.now())
         print('Batches per epoch:', len(self.train_loader))
         self.model.train()
@@ -243,6 +242,7 @@ class dl_model:
 
                 # calculate loss
                 loss = self.model.calculate_loss(outputs, labels, input_lens, label_lens)
+                print(loss)
                 test_loss += loss.item()
 
                 outputs = outputs.cpu().numpy()
