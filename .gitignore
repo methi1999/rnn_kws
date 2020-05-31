@@ -1,8 +1,13 @@
-plots_GRU_4_512/
-models_GRU_4_512
+.gitignore
 .idea/
 trial/
 trial_old/
 *.pkl
 *.png
 *.json
+__pycache__/
+architectures/__pycache__/
+models/
+models_old/
+pickle/
+plots/
